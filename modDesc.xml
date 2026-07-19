@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<modDesc descVersion="94">
+    <author>you</author>
+    <version>0.1.0.0</version>
+    <title>
+        <en>Immersive Weathering</en>
+    </title>
+    <description>
+        <en><![CDATA[
+Every gravel field has a chance to grow grass. Tyres on gravel fields remove grass.
+So gravel paths should develop immersive tyre ruts all on their own. 
+]]></en>
+    </description>
+    <iconFilename>icon_immersive_weathering.dds</iconFilename>
+    <multiplayer supported="true" />
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/ImmersiveWeathering.lua" />
+    </extraSourceFiles>
+
+    <!-- 1. Define the action name -->
+    <actions>
+        <action name="IMMERSIVE_WEATHERING_DEBUG" category="PLAYER_ON_FOOT"/>
+    </actions>
+
+    <!-- 2. Bind the action to default keys -->
+    <bindings>
+        <binding action="IMMERSIVE_WEATHERING_DEBUG" device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_j" />
+    </bindings>
+</modDesc>
