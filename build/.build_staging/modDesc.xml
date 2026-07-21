@@ -16,12 +16,20 @@
     </extraSourceFiles>
 
     <actions>
-        <action name="IMMERSIVE_WEATHERING_DEBUG" axisType="HALF" category="PLAYER_ON_FOOT"/>
+        <action name="IMMERSIVE_WEATHERING_DEBUG" axisType="HALF" category="ONFOOT"/>
+        <action name="IMMERSIVE_WEATHERING_DEBUG2" axisType="HALF" category="ONFOOT"/>
+        <action name="IMMERSIVE_WEATHERING_DEBUG3" axisType="HALF" category="ONFOOT"/>
     </actions>
 
     <inputBinding>
         <actionBinding action="IMMERSIVE_WEATHERING_DEBUG">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_j" index="1" />
+        </actionBinding>
+        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG2">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_m" index="1" />
+        </actionBinding>
+        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG3">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
         </actionBinding>
     </inputBinding>
 
@@ -29,5 +37,11 @@
         <text name="input_IMMERSIVE_WEATHERING_DEBUG">
             <en>Immersive Weathering: Force Grass Spawning</en>
         </text>
-    </l10n>
+        <text name="input_IMMERSIVE_WEATHERING_DEBUG2">
+            <en>Spawn grass</en>
+        </text>
+         <text name="input_IMMERSIVE_WEATHERING_DEBUG3">
+            <en>Debug player position</en>
+        </text>
+     </l10n>
 </modDesc>

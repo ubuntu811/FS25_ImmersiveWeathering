@@ -39,30 +39,12 @@ function ImmersiveWeathering:loadMap(name)
 
     ImmersiveWeathering:findGravelLayers()
 
-    -- Debug hotkey (LSHIFT+J, declared in modDesc.xml).
-    -- Args: action, target, callback, triggerUp, triggerDown, triggerAlways, startActive
-    -- triggerDown=true, triggerUp=false is the usual "fire once when pressed" combo.
-    -- CONFIRM in-game this doesn't fire repeatedly while held; if it does, the
-    -- triggerUp/triggerDown/triggerAlways flags need adjusting.
-    local eventId
-    _, eventId = g_inputBinding:registerActionEvent(
-        InputAction.IMMERSIVE_WEATHERING_DEBUG,
-        ImmersiveWeathering,
-        ImmersiveWeathering.onDebugKeyPressed,
-        false, -- triggerUp
-        true,  -- triggerDown
-        false, -- triggerAlways
-        true   -- startActive
-    )
-    if eventId ~= nil then
-        g_inputBinding:setActionEventTextVisibility(eventId, true)
-    end
-
     -- Day-change hook. Fires once per in-game day, including through sleep-skip.
+    -- Confirmed working from your own test log.
     g_messageCenter:subscribe(MessageType.DAY_CHANGED, ImmersiveWeathering.onDayChanged, ImmersiveWeathering)
 
     ImmersiveWeathering.isInitialized = true
-    print("Immersive Weathering (FS25): ready. Press LSHIFT+J to force a sweep.")
+    print("Immersive Weathering (FS25): ready.")
     print("----------------------------------------------------------------------")
 end
 
@@ -74,17 +56,146 @@ end
 addModEventListener(ImmersiveWeathering)
 
 -- ============================================================
+-- Debug hotkey registration
+-- ============================================================
+-- CONFIRMED WORKING PATTERN, taken directly from FS25_PowerTools (a real
+-- published mod, confirmed running on this machine). Action events must be
+-- registered inside PlayerInputComponent.registerGlobalPlayerActionEvents via
+-- Utils.appendedFunction - NOT at general mod load time - or the game's input
+-- system silently drops them when it rebuilds the action list. This was the
+-- actual bug behind "nothing happens" and "doesn't show in the keybind HUD."
+
+PlayerInputComponent.registerGlobalPlayerActionEvents = Utils.appendedFunction(PlayerInputComponent.registerGlobalPlayerActionEvents, function()
+    local triggerUp, triggerDown, triggerAlways, startActive, callbackState, disableConflictingBindings = false, true, false, true, nil, true
+
+    local success, actionEventId, otherEvents = g_inputBinding:registerActionEvent(
+        InputAction.IMMERSIVE_WEATHERING_DEBUG,
+        ImmersiveWeathering,
+        ImmersiveWeathering.onDebugKeyPressed,
+        triggerUp, triggerDown, triggerAlways, startActive,
+        callbackState, disableConflictingBindings
+    )
+
+    if success then
+        print("Immersive Weathering (FS25): successfully bound action key 1")
+        g_inputBinding:setActionEventTextPriority(actionEventId, GS_PRIO_NORMAL)
+        g_inputBinding:setActionEventTextVisibility(actionEventId, true)
+    else
+        print("Immersive Weathering (FS25): FAILED to register debug hotkey.")
+    end
+
+
+    success, actionEventId, otherEvents = g_inputBinding:registerActionEvent(
+        InputAction.IMMERSIVE_WEATHERING_DEBUG2,
+        ImmersiveWeathering,
+        ImmersiveWeathering.onDebug2KeyPressed,
+        triggerUp, triggerDown, triggerAlways, startActive,
+        callbackState, disableConflictingBindings
+    )
+    if success then
+        print("Immersive Weathering (FS25): successfully bound action key 2")
+        g_inputBinding:setActionEventTextPriority(actionEventId, GS_PRIO_NORMAL)
+        g_inputBinding:setActionEventTextVisibility(actionEventId, true)
+    else
+        print("Immersive Weathering (FS25): FAILED to register debug hotkey.")
+    end
+
+
+
+    local success, actionEventId, otherEvents = g_inputBinding:registerActionEvent(
+        InputAction.IMMERSIVE_WEATHERING_DEBUG3,
+        ImmersiveWeathering,
+        ImmersiveWeathering.onDebug3KeyPressed,
+        triggerUp, triggerDown, triggerAlways, startActive,
+        callbackState, disableConflictingBindings
+    )
+
+    if success then
+        print("Immersive Weathering (FS25): successfully bound action key 3")
+        g_inputBinding:setActionEventTextPriority(actionEventId, GS_PRIO_NORMAL)
+        g_inputBinding:setActionEventTextVisibility(actionEventId, true)
+    else
+        print("Immersive Weathering (FS25): FAILED to register debug hotkey.")
+    end
+end)
+
+-- ============================================================
 -- Callbacks
 -- ============================================================
 
 function ImmersiveWeathering:onDebugKeyPressed(actionName, inputValue, callbackState, isAnalog)
     print("Immersive Weathering (FS25): Hotkey triggered - running manual sweep.")
-    ImmersiveWeathering:runWeatheringSweep()
+    ImmersiveWeathering:debugDumpGroundTypeMappings()
+    ImmersiveWeathering:debugDumpGroundTypeManager()
+    --ImmersiveWeathering:runWeatheringSweep()
+end
+
+function ImmersiveWeathering:onDebug2KeyPressed(actionName, inputValue, callbackState, isAnalog)
+    print("Immersive Weathering (FS25): Debug 2 Key pressed")
+    ImmersiveWeathering:what_am_i_looking_at()
+end
+
+function ImmersiveWeathering:onDebug3KeyPressed(actionName, inputValue, callbackState, isAnalog)
+    print("Immersive Weathering (FS25): Debug 3 Key pressed")
+    ImmersiveWeathering:place_grass()
 end
 
 function ImmersiveWeathering:onDayChanged()
     print("Immersive Weathering (FS25): Day changed - running weathering sweep.")
-    ImmersiveWeathering:runWeatheringSweep()
+    --ImmersiveWeathering:runWeatheringSweep()
+end
+
+function ImmersiveWeathering:what_am_i_looking_at()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1) -- forward vector, confirmed pattern from PlayerCamera.lua
+
+    self.debugFieldRaycastHit = nil
+    raycastClosest(x, y, z, dirX, dirY, dirZ, 200, "onDebugFieldRaycastCallback", self, CollisionFlag.TERRAIN)
+
+    if self.debugFieldRaycastHit ~= nil then
+        local hx, hy, hz = unpack(self.debugFieldRaycastHit)
+        local isOnField, densityBits, groundType = FSDensityMapUtil.getFieldDataAtWorldPosition(hx, hy, hz)
+
+        print(string.format("[FieldData] pos=(%.2f, %.2f, %.2f) isOnField=%s densityBits=%s groundType=%s",
+            hx, hy, hz, tostring(isOnField), tostring(densityBits), tostring(groundType)))
+
+        local  r, g, b, depth, material_id = getTerrainAttributesAtWorldPos(g_terrainNode, hx, hy, hz, true, true, true, true, false)
+        print(string.format("[TerrainAttributes] pos=(%.2f, %.2f, %.2f) rgb(%s,%s,%s) depth(%s) material(%s)",
+               hx, hy, hz, tostring(r), tostring(g), tostring(b), tostring(depth), tostring(material_id)))
+    else
+        print("[FieldData] No terrain hit within raycast range")
+    end
+end
+
+function ImmersiveWeathering:place_grass()
+
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+    raycastClosest(x, y, z, dirX, dirY, dirZ, 200, "onDebugFieldRaycastCallback", self, CollisionFlag.TERRAIN)
+
+    if self.debugFieldRaycastHit ~= nil then
+        local hx, _, hz = unpack(self.debugFieldRaycastHit)
+        local decoName = "grassShort" -- confirmed real mapping name from this map's map.xml
+
+        if g_currentMission.foliageSystem:getIsDecoLayerDefined(decoName) then
+            local size = 1.0
+            g_currentMission.foliageSystem:applyDecoFoliage(decoName, hx, hz, hx + size, hz, hx, hz + size)
+            print("Applied '" .. decoName .. "' at " .. hx .. ", " .. hz)
+        else
+            print("'" .. decoName .. "' not defined on this map")
+        end
+    end
+end
+
+function ImmersiveWeathering:onDebugFieldRaycastCallback(hitObjectId, x, y, z, distance, nx, ny, nz, subShapeIndex, shapeId, isLast)
+    if hitObjectId ~= 0 then
+        self.debugFieldRaycastHit = {x, y, z}
+    end
+    return false -- stop after first hit, raycastClosest only needs one
 end
 
 -- ============================================================
@@ -120,6 +231,67 @@ function ImmersiveWeathering:debugDumpTerrainInfo()
     print("If your map mod ships with a custom ground/gravel density layer, check")
     print("its own scripts or XML for the layer name - that's the fastest path.")
     print("-------------------------------------------------------------------------")
+end
+
+function ImmersiveWeathering:debugDumpGroundTypeManager()
+    local manager = g_groundTypeManager
+
+    if manager == nil then
+        print("[ImmersiveWeathering] ERROR: g_groundTypeManager is nil")
+        return
+    end
+
+    print("[ImmersiveWeathering] g_groundTypeManager fields:")
+
+    for key, value in pairs(manager) do
+        print(string.format(
+            "[ImmersiveWeathering] manager.%s = %s (%s)",
+            tostring(key),
+            tostring(value),
+            type(value)
+        ))
+
+        if type(value) == "table" then
+            for nestedKey, nestedValue in pairs(value) do
+                print(string.format(
+                    "[ImmersiveWeathering]   [%s] = %s (%s)",
+                    tostring(nestedKey),
+                    tostring(nestedValue),
+                    type(nestedValue)
+                ))
+            end
+        end
+    end
+end
+
+function ImmersiveWeathering:debugDumpGroundTypeMappings()
+    local manager = g_groundTypeManager
+
+    if manager == nil then
+        print("[ImmersiveWeathering] ERROR: g_groundTypeManager is nil")
+        return
+    end
+
+    print("[ImmersiveWeathering] ground type mappings:")
+
+    for mappingName, mapping in pairs(manager.groundTypeMappings) do
+        print(string.format(
+            "[ImmersiveWeathering] mapping key=%s value=%s",
+            tostring(mappingName),
+            tostring(mapping)
+        ))
+
+        if type(mapping) == "table" then
+            for fieldName, fieldValue in pairs(mapping) do
+                print(string.format(
+                    "[ImmersiveWeathering]   %s = %s (%s)",
+                    tostring(fieldName),
+                    tostring(fieldValue),
+                    type(fieldValue)
+                ))
+            end
+        end
+    end
 end
 
 -- ============================================================
