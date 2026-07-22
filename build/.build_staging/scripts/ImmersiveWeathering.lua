@@ -29,6 +29,10 @@ ImmersiveWeathering = {}
 ImmersiveWeathering.gravelIndices = {}
 ImmersiveWeathering.isInitialized = false
 
+function debugPrint(str) 
+    print("[ImmersiveWeathering] " .. str)
+end
+
 -- ============================================================
 -- Entry point
 -- ============================================================
@@ -36,8 +40,6 @@ ImmersiveWeathering.isInitialized = false
 function ImmersiveWeathering:loadMap(name)
     print("----------------------------------------------------------------------")
     print("Immersive Weathering (FS25): loadMap() called - initializing...")
-
-    ImmersiveWeathering:findGravelLayers()
 
     -- Day-change hook. Fires once per in-game day, including through sleep-skip.
     -- Confirmed working from your own test log.
@@ -127,7 +129,32 @@ function ImmersiveWeathering:onDebugKeyPressed(actionName, inputValue, callbackS
     print("Immersive Weathering (FS25): Hotkey triggered - running manual sweep.")
     ImmersiveWeathering:debugDumpGroundTypeMappings()
     ImmersiveWeathering:debugDumpGroundTypeManager()
-    --ImmersiveWeathering:runWeatheringSweep()
+
+    print("--- [ImmersiveWeathering] Listing Available Deco Layers ---")
+    local decoFoliages = g_currentMission.foliageSystem.decoFoliages
+    debugPrint("DECO FOLIAGES")
+    for index, foliage in ipairs(decoFoliages) do
+        if foliage and foliage.layerName then
+            debugPrint(tostring(foliage.terrainDataPlaneId) .. " [" .. tostring(index) .. "] : " .. tostring(foliage.layerName))
+        end
+    end
+
+
+    local paintableFoliages = g_currentMission.foliageSystem.paintableFoliages
+    debugPrint("PAINTABLE FOLIAGES")
+    for index, foliage in ipairs(paintableFoliages) do
+        if foliage and foliage.layerName then
+            debugPrint(tostring(foliage.terrainDataPlaneId) .. " [" .. tostring(index) .. "] : " .. tostring(foliage.layerName))
+        end
+    end
+
+--    if g_currentMission.foliageSystem and g_currentMission.foliageSystem.decoLayers then
+--        for name, layerData in pairs(g_currentMission.foliageSystem.decoLayers) do
+--            print("Found Deco Layer Name: " .. tostring(name))
+--        end
+--    else
+--        print("Could not access g_currentMission.foliageSystem.decoLayers")
+--    end
 end
 
 function ImmersiveWeathering:onDebug2KeyPressed(actionName, inputValue, callbackState, isAnalog)
@@ -138,11 +165,11 @@ end
 function ImmersiveWeathering:onDebug3KeyPressed(actionName, inputValue, callbackState, isAnalog)
     print("Immersive Weathering (FS25): Debug 3 Key pressed")
     ImmersiveWeathering:place_grass()
+    ImmersiveWeathering:runWeatheringSweep()
 end
 
 function ImmersiveWeathering:onDayChanged()
-    print("Immersive Weathering (FS25): Day changed - running weathering sweep.")
-    --ImmersiveWeathering:runWeatheringSweep()
+    ImmersiveWeathering:runWeatheringSweep()
 end
 
 function ImmersiveWeathering:what_am_i_looking_at()
@@ -163,6 +190,9 @@ function ImmersiveWeathering:what_am_i_looking_at()
         local  r, g, b, depth, material_id = getTerrainAttributesAtWorldPos(g_terrainNode, hx, hy, hz, true, true, true, true, false)
         print(string.format("[TerrainAttributes] pos=(%.2f, %.2f, %.2f) rgb(%s,%s,%s) depth(%s) material(%s)",
                hx, hy, hz, tostring(r), tostring(g), tostring(b), tostring(depth), tostring(material_id)))
+
+
+       
     else
         print("[FieldData] No terrain hit within raycast range")
     end
@@ -179,11 +209,26 @@ function ImmersiveWeathering:place_grass()
 
     if self.debugFieldRaycastHit ~= nil then
         local hx, _, hz = unpack(self.debugFieldRaycastHit)
-        local decoName = "grassShort" -- confirmed real mapping name from this map's map.xml
+        local decoName = "MEADOW"
+        --local decoName = "grassShort" -- confirmed real mapping name from this map's map.xml
 
         if g_currentMission.foliageSystem:getIsDecoLayerDefined(decoName) then
-            local size = 1.0
-            g_currentMission.foliageSystem:applyDecoFoliage(decoName, hx, hz, hx + size, hz, hx, hz + size)
+            local size = 0 
+            local halfSize = 0.5
+
+            g_currentMission.foliageSystem:applyDecoFoliage(
+                decoName,
+            
+                hx - halfSize,
+                hz - halfSize,
+            
+                hx + halfSize,
+                hz - halfSize,
+            
+                hx - halfSize,
+                hz + halfSize
+            )
+            --g_currentMission.foliageSystem:applyDecoFoliage(decoName, hx, hz, hx + size, hz, hx, hz + size)
             print("Applied '" .. decoName .. "' at " .. hx .. ", " .. hz)
         else
             print("'" .. decoName .. "' not defined on this map")
@@ -211,10 +256,6 @@ end
 -- log.txt for a block starting "GRAVEL DEBUG DUMP" - that will show you
 -- what g_currentMission actually exposes for terrain/ground layers on your
 -- specific map, which is more reliable than any of us guessing further.
-
-function ImmersiveWeathering:findGravelLayers()
-    print("Immersive Weathering (FS25): gravel-layer detection is UNVERIFIED - see debugDumpTerrainInfo()")
-end
 
 function ImmersiveWeathering:debugDumpTerrainInfo()
     print("GRAVEL DEBUG DUMP -----------------------------------------------------")
@@ -304,41 +345,77 @@ end
 -- on non-field terrain isn't a fruitType and doesn't have a terrainDataPlaneId
 -- the way crops do.
 
+function ImmersiveWeathering:place_foliage(x,z,decoName)
+    decoName = decoName or "grassShort"
+    local halfSize = 0.5
+    if g_currentMission.foliageSystem:getIsDecoLayerDefined(decoName) then
+        print(string.format("[Immersive Weathering] %s to (%.2f %.2f)",decoName,x,z))
+        g_currentMission.foliageSystem:applyDecoFoliage(
+            decoName,
+            x - halfSize,
+            z - halfSize,
+            x + halfSize,
+            z - halfSize,
+            x - halfSize,
+            z + halfSize
+        )
+    end
+end
+
+local MATERIAL = {
+    DIRT   = 1,
+    GRASS  = 2,
+    SAND   = 3,
+    GRAVEL = 6,
+    STONE  = 7,
+}
+
+local WEATHERABLE_MATERIALS = {
+    [MATERIAL.DIRT]   = true,
+    [MATERIAL.SAND]   = true,
+    [MATERIAL.GRASS]   = true,
+    [MATERIAL.GRAVEL] = true,
+}
+
+function ImmersiveWeathering:field_is_material(x,z,materials)
+    local  _, _, _, _, material_id = getTerrainAttributesAtWorldPos(g_terrainNode, x, 0, z, true, true, true, true, false)
+
+    local isOnField, _, _ = FSDensityMapUtil.getFieldDataAtWorldPosition(x, 0, z)
+
+    return not isOnField and materials[material_id]
+end
+
+
+function ImmersiveWeathering:random_coord()
+    local terrainSize = g_currentMission.terrainSize
+    local halfSize = terrainSize * 0.5
+
+    local x = -halfSize + math.random() * terrainSize
+    local z = -halfSize + math.random() * terrainSize
+
+    return x, z
+end
+
 function ImmersiveWeathering:runWeatheringSweep()
     print("----------------------------------------------------------------------")
     print("Immersive Weathering (FS25): STARTING weathering sweep...")
-
-    local startTime = getTimeSec()
 
     if g_currentMission == nil then
         print("Immersive Weathering ERROR: g_currentMission is nil.")
         return
     end
 
-    -- PLACEHOLDER VALUES - fill in once findGravelLayers()/debugDumpTerrainInfo()
-    -- gives you the real density map id + channel layout for your target layer.
-    local densityMapId = nil       -- e.g. some grass-foliage density map id
-    local startChannel = 0
-    local numChannels = 4
-    local targetGravelValue = nil  -- the value that means "this pixel is gravel"
 
-    if densityMapId == nil or targetGravelValue == nil then
-        print("Immersive Weathering: sweep skipped - densityMapId/targetGravelValue not set yet.")
-        print("Run debugDumpTerrainInfo() first and fill these in.")
-        print("----------------------------------------------------------------------")
-        return
+    local startTime = getTimeSec()
+    for i = 1, 1000 do
+        if i % 100 == 0 then
+            print(string.format("Weathering sweep done %d%%", i / 10))
+        end
+        local x,z = self:random_coord()
+        if self:field_is_material(x,z,WEATHERABLE_MATERIALS) then
+            self:place_foliage(x,z,"grassShort")
+        end
     end
-
-    local modifier = DensityMapModifier.new(densityMapId, startChannel, numChannels, g_terrainNode)
-    local filter = DensityMapFilter.new(modifier)
-    filter:setValueCompareParams(DensityValueCompareType.EQUAL, targetGravelValue)
-
-    -- executeSet(value, filter) writes `value` to every pixel matching the filter,
-    -- within whatever rectangle/parallelogram is set on the modifier. Without a
-    -- restricted area it operates map-wide - this is a native C-side op, so a
-    -- full-map pass here is cheap (same class of operation FieldManager itself
-    -- uses), unlike doing the equivalent in a Lua loop.
-    modifier:executeSet(1, filter)
 
     local endTime = getTimeSec()
     print(string.format("Immersive Weathering (FS25): FINISHED in %.2f ms", (endTime - startTime)))

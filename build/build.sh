@@ -23,6 +23,9 @@ fi
 
 mkdir -p $BUILD_DIR
 
+echo "=== sanity check lua scripts ==="
+find . -name '*.lua' -print0 | xargs -0 -n1 luac5.4 -p
+
 echo "--> Copying production files to staging area..."
 # Copy the core runtime logic and metadata
 for i in icon_immersive_weathering.dds scripts/ l10n/ modDesc.xml; do 
