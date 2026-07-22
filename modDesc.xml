@@ -35,13 +35,13 @@
 
     <l10n>
         <text name="input_IMMERSIVE_WEATHERING_DEBUG">
-            <en>Immersive Weathering: Force Grass Spawning</en>
+            <en>Debug World</en>
         </text>
         <text name="input_IMMERSIVE_WEATHERING_DEBUG2">
-            <en>Spawn grass</en>
+            <en>What am I looking at?</en>
         </text>
          <text name="input_IMMERSIVE_WEATHERING_DEBUG3">
-            <en>Debug player position</en>
+            <en>Run weathering sweep</en>
         </text>
      </l10n>
 </modDesc>
