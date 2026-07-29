@@ -39,6 +39,8 @@ local TEST_RIG_DECO_NAMES = {
 local TEST_RIG_SPACING = 2.0
 local TEST_RIG_MEADOW_STATES = 9
 local TEST_RIG_DECO_REPEAT_LEVELS = 9
+local AREA_FILL_SIZE = 3.0
+local AREA_FILL_STEP = 0.5
 
 -- Reverted back to grassShort after proving meadow-sowing was a dead end:
 -- FSDensityMapUtil.updateSowingArea only ever succeeds on ground that's
@@ -230,6 +232,12 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
                 ImmersiveWeathering.onDebug3KeyPressed,
                 "debug key 3"
             )
+
+            registerDebugAction(
+                InputAction.IMMERSIVE_WEATHERING_DEBUG4,
+                ImmersiveWeathering.onDebug4KeyPressed,
+                "debug key 4"
+            )
         end
     )
 
@@ -256,6 +264,16 @@ function ImmersiveWeathering:onDebug2KeyPressed(
 )
     debugPrint("Immersive Weathering (FS25): Debug 2 key pressed")
     self:weatherAtCrosshair()
+end
+
+function ImmersiveWeathering:onDebug4KeyPressed(
+    actionName,
+    inputValue,
+    callbackState,
+    isAnalog
+)
+    debugPrint("Immersive Weathering (FS25): Debug 4 key pressed")
+    self:placeFoliageAreaFill()
 end
 
 function ImmersiveWeathering:onDebug3KeyPressed(
@@ -446,6 +464,51 @@ function ImmersiveWeathering:weatherAtCrosshair()
         hx, hz, before, after,
         stats.seeded or 0, stats.spread or 0, stats.weeded or 0, stats.fruited or 0
     )
+end
+
+-- For the "annoying bush" question: does densely surrounding it with
+-- grassShort do anything to it? Bet is no - everything tonight pointed at
+-- it not being part of the density-map system at all (plow/mow/deco-clear
+-- all passed through it untouched) - but cheap to actually check instead
+-- of assuming. Fills a real 3x3m area (not a row) around the crosshair
+-- position with grassShort, ignoring every gate (material/field/clear-
+-- spot checks) since this is a deliberate manual test, not ambient
+-- weathering - ok to try even in a normally-excluded spot.
+function ImmersiveWeathering:placeFoliageAreaFill()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+
+    raycastClosest(
+        x, y, z,
+        dirX, dirY, dirZ,
+        200,
+        "onDebugFieldRaycastCallback",
+        self,
+        CollisionFlag.TERRAIN
+    )
+
+    if self.debugFieldRaycastHit == nil then
+        debugPrint("[AreaFill] No terrain hit within raycast range")
+        return
+    end
+
+    local hx, _, hz = unpack(self.debugFieldRaycastHit)
+    local half = AREA_FILL_SIZE * 0.5
+    local placed = 0
+
+    for px = hx - half, hx + half, AREA_FILL_STEP do
+        for pz = hz - half, hz + half, AREA_FILL_STEP do
+            if self:placeFoliage(px, pz, GRASS_LOW_WRITE) then
+                placed = placed + 1
+            end
+        end
+    end
+
+    debugPrintf("[AreaFill] %dx%dm around (%.2f %.2f): %d/%d stamps placed",
+        AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, placed, ((AREA_FILL_SIZE / AREA_FILL_STEP) + 1) ^ 2)
 end
 
 -- Deterministic test rig: no dice rolls, no waiting on the sweep to find

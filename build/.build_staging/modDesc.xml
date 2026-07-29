@@ -19,6 +19,7 @@
         <action name="IMMERSIVE_WEATHERING_DEBUG" axisType="HALF" category="ONFOOT"/>
         <action name="IMMERSIVE_WEATHERING_DEBUG2" axisType="HALF" category="ONFOOT"/>
         <action name="IMMERSIVE_WEATHERING_DEBUG3" axisType="HALF" category="ONFOOT"/>
+        <action name="IMMERSIVE_WEATHERING_DEBUG4" axisType="HALF" category="ONFOOT"/>
     </actions>
 
     <inputBinding>
@@ -31,6 +32,9 @@
         <actionBinding action="IMMERSIVE_WEATHERING_DEBUG3">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
         </actionBinding>
+        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG4">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_f" index="1" />
+        </actionBinding>
     </inputBinding>
 
     <l10n>
@@ -42,6 +46,9 @@
         </text>
          <text name="input_IMMERSIVE_WEATHERING_DEBUG3">
             <en>Run weathering sweep</en>
+        </text>
+         <text name="input_IMMERSIVE_WEATHERING_DEBUG4">
+            <en>Fill 3x3m area with grass</en>
         </text>
      </l10n>
 </modDesc>
