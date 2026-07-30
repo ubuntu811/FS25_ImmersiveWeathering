@@ -4,7 +4,7 @@
 set -e
 
 # Define source archive and destination folder name
-MOD_NAME="ImmersiveWeathering"
+MOD_NAME="FS25_ImmersiveWeathering"
 SOURCE_ZIP="build/${MOD_NAME}.zip"
 TARGET_DIR_NAME="$HOME/fs25/mods/${MOD_NAME}"
 

@@ -4,7 +4,7 @@
 set -e
 
 # Define configuration variables
-MOD_NAME="ImmersiveWeathering"
+MOD_NAME="FS25_ImmersiveWeathering"
 TARGET_ZIP="build/${MOD_NAME}.zip"
 BUILD_DIR="build/.build_staging"
 

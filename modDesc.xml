@@ -16,39 +16,76 @@
     </extraSourceFiles>
 
     <actions>
-        <action name="IMMERSIVE_WEATHERING_DEBUG" axisType="HALF" category="ONFOOT"/>
-        <action name="IMMERSIVE_WEATHERING_DEBUG2" axisType="HALF" category="ONFOOT"/>
-        <action name="IMMERSIVE_WEATHERING_DEBUG3" axisType="HALF" category="ONFOOT"/>
-        <action name="IMMERSIVE_WEATHERING_DEBUG4" axisType="HALF" category="ONFOOT"/>
+        <!-- IW_PLACE_TEST_RIG and IW_FILL_AREA are retired for now, not
+             just unbound - no action, no binding, no l10n. The underlying
+             functions (placeFoliageTestRig, placeFoliageAreaFill) and their
+             key-press handlers are untouched in the Lua, just no longer
+             wired to an input action. Re-add all three pieces together to
+             bring a debug key back. -->
+        <action name="IW_WEATHER_CROSSHAIR" axisType="HALF" category="ONFOOT"/>
+        <action name="IW_RUN_SWEEP" axisType="HALF" category="ONFOOT"/>
+        <action name="IW_TOGGLE_SAMPLE_COUNT" axisType="HALF" category="ONFOOT"/>
+        <!-- Tried category="ONFOOT" and category="VEHICLE" on these three
+             through the global g_inputBinding registration path - neither
+             was ever the real fix, since that whole path was the wrong
+             mechanism for a vehicle-context action. Now registered per-
+             vehicle via Vehicle:onRegisterActionEvents + self:addActionEvent
+             (see "Vehicle-scoped tyre control keys" in the Lua), the same
+             pattern real vehicle specializations use - confirmed against
+             TerraFarm's own MACHINE_TOGGLE_ACTIVE, which likewise declares
+             no category attribute at all. No AI-exclude toggle - AI-driven
+             vehicles are unconditionally excluded from tyre effects in the
+             Lua, player-only by design, not an option. -->
+        <action name="IW_TOGGLE_TYRE_EFFECTS" axisType="HALF"/>
+        <action name="IW_CYCLE_WITHER_CHANCE" axisType="HALF"/>
+        <action name="IW_TOGGLE_PAINT_BIAS" axisType="HALF"/>
     </actions>
 
     <inputBinding>
-        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_g" index="1" />
-        </actionBinding>
-        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG2">
+        <actionBinding action="IW_WEATHER_CROSSHAIR">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_h" index="1" />
         </actionBinding>
-        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG3">
+        <actionBinding action="IW_RUN_SWEEP">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
         </actionBinding>
-        <actionBinding action="IMMERSIVE_WEATHERING_DEBUG4">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_f" index="1" />
+        <actionBinding action="IW_TOGGLE_SAMPLE_COUNT">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_i" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_TOGGLE_TYRE_EFFECTS">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_t" index="1" />
+        </actionBinding>
+        <!-- Single-Shift+letter combos kept colliding with per-vehicle
+             defaults all night (T flaky, Y dead, P clashed with a menu,
+             now O/U clash with crab/all-wheel steering on this tractor).
+             Confirmed via FS25_followme's own FOLLOW_CHASER_CHOOSE that a
+             3-token chord (two modifiers + one key) is valid syntax, and
+             far less likely to already be claimed by any vehicle. -->
+        <actionBinding action="IW_CYCLE_WITHER_CHANCE">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_b" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_TOGGLE_PAINT_BIAS">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_v" index="1" />
         </actionBinding>
     </inputBinding>
 
     <l10n>
-         <text name="input_IMMERSIVE_WEATHERING_DEBUG">
-            <en>Place foliage test rig</en>
+         <text name="input_IW_WEATHER_CROSSHAIR">
+            <en>Weather Target</en>
         </text>
-         <text name="input_IMMERSIVE_WEATHERING_DEBUG2">
-            <en>Weather what I'm looking at</en>
+         <text name="input_IW_RUN_SWEEP">
+            <en>Weathering Sweep</en>
         </text>
-         <text name="input_IMMERSIVE_WEATHERING_DEBUG3">
-            <en>Run weathering sweep</en>
+         <text name="input_IW_TOGGLE_SAMPLE_COUNT">
+            <en>Sweep sample count</en>
         </text>
-         <text name="input_IMMERSIVE_WEATHERING_DEBUG4">
-            <en>Fill 3x3m area with grass</en>
+         <text name="input_IW_TOGGLE_TYRE_EFFECTS">
+            <en>Tyre withering</en>
+        </text>
+         <text name="input_IW_CYCLE_WITHER_CHANCE">
+            <en>Tyre withering weight</en>
+        </text>
+         <text name="input_IW_TOGGLE_PAINT_BIAS">
+            <en>Tyre withering material</en>
         </text>
      </l10n>
 </modDesc>
