@@ -2045,22 +2045,29 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         local centerX = (x1 + x2) * 0.5
         local centerZ = (z1 + z2) * 0.5
 
-        -- Theory: clearDecoArea silently doesn't touch "meadow"/
-        -- "forestGrass" (the base ambient ground-cover names) even though
-        -- it logs as if it succeeded - clearedName was only ever read
-        -- BEFORE the clear call, so a no-op look identical to a real wipe
-        -- in the log. "grassShort"/decoFoliage (what placeFoliage writes)
-        -- is a layer we've directly confirmed clearable and re-readable
-        -- all session. So: normalize first - write short grass over
-        -- whatever's there - then clear that known-clearable layer,
-        -- instead of trusting clearDecoArea against an arbitrary name.
-        local function clearFoliageAt(fx, fz, fx0, fz0, fx1, fz1, fx2, fz2, tag)
+        -- The "normalize to grassShort, then clear that" trick only
+        -- belongs on the wither branch below, not here. Running it on
+        -- EVERY frame a tyre touches already-dirt/gravel ground (the
+        -- unconditional backstop) meant its write - a randomized 0.7-1.4m
+        -- stamp that doesn't reliably nest inside the tyre's own narrow
+        -- contact quad used for the clear call right after it - could
+        -- outrun the clear on a plain gravel road with only faint ambient
+        -- ground cover reading as "something", 30-60 times a second:
+        -- "pristine gravel road, grass behind me". Wither only fires once
+        -- per successful conversion, not every frame, so the same trick
+        -- there is a single deliberate write+clear, not a runaway one -
+        -- if there's foliage to clear, place short grass over it first so
+        -- clearDecoArea has a known-clearable layer to act on; otherwise
+        -- leave the spot alone entirely.
+        local function clearFoliageAt(fx, fz, fx0, fz0, fx1, fz1, fx2, fz2, tag, normalizeFirst)
             local clearedName = self:getFoliageNameAt(fx, fz)
             if clearedName == nil then
                 return
             end
 
-            self:placeFoliage(fx, fz, GRASS_LOW_WRITE)
+            if normalizeFirst then
+                self:placeFoliage(fx, fz, GRASS_LOW_WRITE)
+            end
             FSDensityMapUtil.clearDecoArea(fx0, fz0, fx1, fz1, fx2, fz2)
 
             debugPrintf(
@@ -2081,7 +2088,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         -- frame of ordinary grass driving (1104 clear attempts in one
         -- five-minute test), not just on ground we'd already converted.
         if self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS) then
-            clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreClear")
+            clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreClear", false)
         end
 
         -- Wither and displace used to share one mutually-exclusive roll,
@@ -2106,7 +2113,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
                 -- the same pass. Bundled here as one action/one dice
                 -- roll, not left to the unconditional check above to
                 -- mop up next frame.
-                clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither")
+                clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither", true)
                 debugPrintf(
                     "[TyreWither] grass -> %s at (%.2f %.2f)",
                     materialName,
@@ -2117,6 +2124,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         end
 
         if not self:isOnField(centerX, centerZ)
+            and not self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS)
             and math.random() <= TYRE_DISPLACE_CHANCE / wheelCount
         then
             local currentName = self:getFoliageNameAt(centerX, centerZ)
@@ -2126,7 +2134,14 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
             -- which also matched plain "meadow"/"forestGrass" ambient
             -- ground cover (basically everywhere off-field), scattering
             -- redundant grass on top of paths instead of only clearing
-            -- real deco bushes.
+            -- real deco bushes. Still wasn't enough on its own - an
+            -- established dirt/gravel road with roadside bush deco is
+            -- also "off-field", so a truck driving straight down one hit
+            -- displace on every bush along the way, sprouting a steady
+            -- row of fresh grass down the middle of what's supposed to
+            -- read as a worn road. Excluding TERRAIN_REGROWTH_TARGETS
+            -- here means displace only touches bushes standing on
+            -- untouched ground, not ground already part of a path.
             if currentName == BUSH then
                 if self:placeFoliage(centerX, centerZ, GRASS_LOW_WRITE) then
                     debugPrintf(
