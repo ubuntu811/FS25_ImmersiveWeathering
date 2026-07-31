@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="93">
-    <author>YourName</author>
+    <author>ubuntu811</author>
     <version>1.0.0.0</version>
     <title>
         <en>Immersive Weathering</en>
@@ -10,6 +10,17 @@
     </description>
     <iconFilename>icon_immersive_weathering.dds</iconFilename>
     <multiplayer supported="true"/>
+
+    <!-- Not a hard requirement - IW works completely standalone (every
+         WailaHud/g_currentMission read is nil-guarded with a fallback).
+         Declared anyway because "works standalone" undersells it: without
+         WAILA installed, IW's own HUD panels lose their left-edge anchor
+         point and fall back to a fixed corner, and there's no live world
+         inspector to pair with the tyre/foliage mechanics at all - the
+         intended experience is genuinely the two together, not IW alone. -->
+    <dependencies>
+        <dependency>FS25_whatAmILookingAt</dependency>
+    </dependencies>
 
     <extraSourceFiles>
         <sourceFile filename="scripts/ImmersiveWeathering.lua" />
@@ -22,20 +33,25 @@
              key-press handlers are untouched in the Lua, just no longer
              wired to an input action. Re-add all three pieces together to
              bring a debug key back. -->
-        <action name="IW_WEATHER_CROSSHAIR" axisType="HALF" category="ONFOOT"/>
-        <action name="IW_RUN_SWEEP" axisType="HALF" category="ONFOOT"/>
-        <action name="IW_TOGGLE_SAMPLE_COUNT" axisType="HALF" category="ONFOOT"/>
-        <!-- Tried category="ONFOOT" and category="VEHICLE" on these three
-             through the global g_inputBinding registration path - neither
-             was ever the real fix, since that whole path was the wrong
-             mechanism for a vehicle-context action. Now registered per-
-             vehicle via Vehicle:onRegisterActionEvents + self:addActionEvent
-             (see "Vehicle-scoped tyre control keys" in the Lua), the same
-             pattern real vehicle specializations use - confirmed against
-             TerraFarm's own MACHINE_TOGGLE_ACTIVE, which likewise declares
-             no category attribute at all. No AI-exclude toggle - AI-driven
-             vehicles are unconditionally excluded from tyre effects in the
-             Lua, player-only by design, not an option. -->
+        <action name="IW_WEATHER_CROSSHAIR" axisType="HALF"/>
+        <action name="IW_RUN_SWEEP" axisType="HALF"/>
+        <action name="IW_TOGGLE_SAMPLE_COUNT" axisType="HALF"/>
+        <!-- No category attribute on any action below either: tried
+             category="ONFOOT" and category="VEHICLE" through the global
+             g_inputBinding registration path earlier, and also tried a
+             fully per-vehicle Vehicle:onRegisterActionEvents +
+             self:addActionEvent mechanism (the pattern real vehicle
+             specializations use, confirmed against TerraFarm's own
+             MACHINE_TOGGLE_ACTIVE) - that per-vehicle approach was flaky
+             (isActiveForInput silently flipped false and wiped bindings)
+             and was fully reverted. All six IW_* actions now register once
+             globally via PlayerInputComponent.registerGlobalPlayerActionEvents
+             and stay active identically on foot or in any vehicle; category
+             is omitted everywhere so the engine's own ONFOOT/VEHICLE context
+             switch can't silently deactivate them out from under us. No
+             AI-exclude toggle - AI-driven vehicles are unconditionally
+             excluded from tyre effects in the Lua, player-only by design,
+             not an option. -->
         <action name="IW_TOGGLE_TYRE_EFFECTS" axisType="HALF"/>
         <action name="IW_CYCLE_WITHER_CHANCE" axisType="HALF"/>
         <action name="IW_TOGGLE_PAINT_BIAS" axisType="HALF"/>

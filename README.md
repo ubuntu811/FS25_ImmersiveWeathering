@@ -1,89 +1,66 @@
-# Smart Minimap Auto (FS25) — add-on for FS25_minimapPlus
+# FS25_ImmersiveWeathering
 
-## The pivot from the first scaffold
-Your uploaded `FS25_minimapPlus` mod (by 50keda) already patches the base
-game's `MapOverlayGenerator` and exposes exactly the field states you asked
-for as ready-made overlays:
+Ambient vegetation and tyre-weathering mod for Farming Simulator 25. Grass
+gradually reclaims neglected gravel/dirt patches overnight, and driving
+wears grass down into dirt tracks that stay clear of regrowing foliage -
+so paths you actually drive look driven, and ground you leave alone
+slowly goes wild.
 
-| MinimapPlus overlay ID | What it shows |
+Pairs with [FS25_whatAmILookingAt](https://github.com/ubuntu811/FS25_whatAmILookingAt)
+(soft dependency, not required - see below).
+
+## What it does
+
+**Tyre weathering** - while driving, wheels in contact with the ground can:
+- **Wither**: grass-textured ground has a chance to convert to dirt or
+  gravel, clearing any standing foliage on it in the same action.
+- **Displace**: off-field deco bushes have a separate chance to get
+  flattened into short grass.
+- Ground already converted to dirt/gravel is kept free of regrowing
+  foliage automatically, no roll needed.
+
+Effects are scaled down per vehicle by wheel count, so a 6-wheeled
+combine doesn't wear ground 6x faster than a 2-wheeled ATV at the same
+dial setting. AI-driven vehicles are unconditionally excluded - player
+driving only, by design.
+
+**Nightly weathering loops** - a periodic sweep samples random points
+across gravel/dirt areas and lets weeds/grass creep back in over time,
+independent of whether anyone's driven there.
+
+## Controls
+
+All defaults below - Shift+letter combos can be rebound like any other
+action via the in-game controls menu; the HUD always shows your actual
+current binding, not the default.
+
+| Key | Action |
 |---|---|
-| `NEEDS_ROLLING` | fields the base game considers needing rolling |
-| `NEEDS_PLOWING` | fields needing tillage (covers plow *and* cultivator) |
-| `WEEDS` | fields with weeds |
-| `CROPS` | all fields color-coded by fruit type |
-| `GROWTH` | all fields color-coded by growth stage |
+| `Left Shift + T` | Toggle tyre weathering on/off |
+| `Left Shift + B` | Cycle tyre withering chance (0-100%, 20% steps) |
+| `Left Shift + V` | Toggle tyre withering material bias (dirt-leaning / gravel-leaning) |
+| `Left Shift + H` | Set the nightly-sweep weather target to where you're looking |
+| `Left Shift + N` | Run a weathering sweep immediately |
+| `Left Shift + I` | Cycle sweep sample count (1000-10000) |
 
-This means the hard, uncertain part of the first scaffold — guessing at
-field state from density-map samples — isn't needed at all. The base game
-already tracks this; MinimapPlus already surfaces it; your mod's whole job
-is: **detect what you entered → set MinimapPlus's overlay ID → done.**
+An always-visible HUD (bottom-left area) shows current settings and live
+keybinds for all of the above.
 
-Keep MinimapPlus installed. `SmartMinimapAuto` is a separate, small add-on
-that drives it — it doesn't replace or modify it.
+## Install
 
-## What works now vs. what's still a guess
-**Solid (verified from MinimapPlus's own source, not guessed):**
-- `MMapPlusMapIDs.NEEDS_ROLLING` / `NEEDS_PLOWING` / `WEEDS` / `CROPS` exist
-  and are exactly what you set `mapOverlayGenerator.mMapPlusSelectedOverlayType`
-  to, followed by `:generateSelectedOverlay(true)`, to force an overlay.
+Drop `FS25_ImmersiveWeathering` into your FS25 mods folder like any other
+mod. WAILA is optional but recommended - without it, IW's HUD panel
+loses its anchor point and falls back to a fixed screen position, and
+there's no companion world inspector to pair with the effects.
 
-**Still a guess, same caveat as before — run Discovery first:**
-- `VehicleClassifier.lua`'s `WorkAreaType` names (roller/cultivator/weeder
-  identification). This is unrelated to the overlay system; it's purely
-  "what did the player just get into."
+## Engine API notes
 
-## Step 1 — Discovery pass
-1. Drop both `FS25_minimapPlus` and `SmartMinimapAuto` into your mods
-   folder, enable both.
-2. `DISCOVERY_MODE = true` by default in `SmartMinimapAuto.lua`.
-3. Load a save, enter a roller, cultivator, weeder, combine+grain header,
-   beet/carrot harvester in turn.
-4. Check `log.txt` for two things per entry:
-   - the `MinimapPlus presence` block — confirms the overlay side is wired
-     up correctly for your patch (should show `true` everywhere)
-   - the vehicle dump — real `spec_*` names and `WorkAreaType` values, same
-     as before, to fill into `VehicleClassifier.lua`
+Shared with WAILA - see
+[docs/engine-api/](https://github.com/ubuntu811/FS25_whatAmILookingAt/tree/main/docs/engine-api)
+in that repo for reverse-engineered notes on FS25 natives used by both
+mods (foliage density maps, terrain paint, tree planting, collision
+flags, etc.).
 
-## Step 2 — fill in VehicleClassifier.lua, flip DISCOVERY_MODE off
-Same process as the original scaffold — see the comments in that file.
+## License
 
-## The one known gap: fruit-filtered harvest overlay
-Right now, entering a combine or root-crop harvester shows MinimapPlus's
-existing `CROPS` overlay — **all** fruit types color-coded, not narrowed to
-just what your header supports (e.g. only beets+carrots). That's a real
-limitation, not an oversight: MinimapPlus keeps its live overlay handle in a
-`local MMapPlus` table inside `MMapPlus.lua`, which by Lua scoping rules is
-invisible outside that file. An add-on mod genuinely cannot reach in and
-swap that handle for a custom fruit-filtered one.
-
-Two ways forward, your call:
-1. **Leave it** — `CROPS` view is still a real improvement over manually
-   cycling with Alt+9/Ctrl+9, you just eyeball the right colors.
-2. **One-line edit to MinimapPlus itself**, since you said you're open to
-   expanding it: in `MMapPlus.lua`, change
-   ```lua
-   local MMapPlus = {}
-   ```
-   to
-   ```lua
-   MMapPlus = {}
-   ```
-   That's it — makes it a global. Once that's live, `SmartMinimapAuto` can
-   call `mapOverlayGenerator:generateGrowthStateOverlay(callback, allGrowthStates, yourFruitSet)`
-   directly and set `MMapPlus.overlay = handle` itself, giving a real
-   "only fields growing beets/carrots" view. I didn't make this edit for
-   you automatically — it's someone else's mod file, and whether to patch
-   a third-party mod's source is worth deciding deliberately rather than
-   me doing it silently. Say the word and I'll wire it up properly with the
-   global exposed.
-
-## Behavior notes
-- Auto-switch only fires on entering/leaving a vehicle — it won't fight you
-  if you manually cycle overlays with Alt+9 mid-session.
-- Leaving any vehicle resets the overlay to `FIELDS` (MinimapPlus's neutral
-  "no overlay" state).
-- `SOWING` is intentionally left unmapped — there's no built-in "ready to
-  sow" overlay in MinimapPlus to hook into. Worth a discovery-style dig if
-  you want it later (possibly derivable as "tilled but not `CROPS`-flagged"
-  by combining two overlays, but that's genuinely new logic, not something
-  already sitting there like the others).
+GPLv3 - see [LICENSE](LICENSE).

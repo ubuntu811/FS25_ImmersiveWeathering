@@ -279,10 +279,9 @@ local HUD_LEFT_FALLBACK = 0.20
 local HUD_TOP = 0.98
 local HUD_PANEL_WIDTH = 0.19
 local HUD_PANEL_GAP = 0.010
-local HUD_PANEL_HEADER_HEIGHT = 0.026
+local HUD_PANEL_HEADER_HEIGHT = 0.040
 local HUD_PANEL_BODY_HEIGHT = 0.072
 local HUD_PANEL_HEIGHT = HUD_PANEL_HEADER_HEIGHT + HUD_PANEL_BODY_HEIGHT
-local HUD_SHADOW_OFFSET = 0.004
 local HUD_TITLE_SIZE = 0.016
 local HUD_LABEL_SIZE = 0.0135
 local HUD_KEYBIND_SIZE = 0.0135
@@ -303,7 +302,6 @@ local function buildTyrePanel(self)
 
     return {
         title = "TYRE WITHERING",
-        headerValue = self.tyreEffectsEnabled and "Enabled" or "Disabled",
         headerKeybind = getActionKeyLabel("IW_TOGGLE_TYRE_EFFECTS", "[Shift+T]"),
         headerColor = self.tyreEffectsEnabled and {0.25, 0.75, 0.25} or {0.75, 0.25, 0.25},
         cells = {
@@ -326,7 +324,7 @@ end
 local function buildSweepPanel(self)
     return {
         title = "NIGHTLY WEATHERING LOOPS",
-        headerValue = nil,
+        headerKeybind = nil,
         cells = {
             {
                 label = "Samples",
@@ -353,11 +351,6 @@ end
 local function drawHudPanel(left, panel)
     local panelBottom = HUD_TOP - HUD_PANEL_HEIGHT
 
-    drawFilledRect(
-        left + HUD_SHADOW_OFFSET, panelBottom - HUD_SHADOW_OFFSET,
-        HUD_PANEL_WIDTH, HUD_PANEL_HEIGHT,
-        0, 0, 0, 0.45
-    )
     drawFilledRect(left, panelBottom, HUD_PANEL_WIDTH, HUD_PANEL_HEIGHT, 0, 0, 0, 0.65)
 
     setTextAlignment(RenderText.ALIGN_LEFT)
@@ -366,12 +359,14 @@ local function drawHudPanel(left, panel)
     renderText(left + 0.008, HUD_TOP - 0.017, HUD_TITLE_SIZE, panel.title)
     setTextBold(false)
 
-    if panel.headerValue ~= nil then
-        setTextAlignment(RenderText.ALIGN_RIGHT)
+    if panel.headerKeybind ~= nil then
+        -- No separate "Enabled"/"Disabled" label needed - the keybind
+        -- itself in the on/off color already says which it is, and reads
+        -- as one clean line under the title instead of two labels
+        -- competing for space.
+        setTextAlignment(RenderText.ALIGN_LEFT)
         setTextColor(panel.headerColor[1], panel.headerColor[2], panel.headerColor[3], 1)
-        renderText(left + HUD_PANEL_WIDTH - 0.008, HUD_TOP - 0.017, HUD_LABEL_SIZE, panel.headerValue)
-        setTextColor(0.65, 0.65, 0.65, 1)
-        renderText(left + HUD_PANEL_WIDTH - 0.008, HUD_TOP - 0.028, HUD_KEYBIND_SIZE, panel.headerKeybind)
+        renderText(left + 0.008, HUD_TOP - 0.034, HUD_KEYBIND_SIZE, panel.headerKeybind)
     end
 
     drawFilledRect(left, HUD_TOP - HUD_PANEL_HEADER_HEIGHT, HUD_PANEL_WIDTH, 0.001, 0, 0, 0, 0.7)
@@ -1852,7 +1847,6 @@ end
 -- ============================================================
 
 local TYRE_CLEAR_DISTANCE = 0.35
-local TYRE_CLEAR_CHANCE = 0.35
 local TYRE_DISPLACE_CHANCE = 0.15
 
 function ImmersiveWeathering:getTyreWitherChance()
@@ -1976,7 +1970,33 @@ end
 -- bare paths - and skips ground that's already grass, since overwriting
 -- grass with grass is a no-op. Both new actions respect the same field
 -- exclusion as everything else in this file.
-function ImmersiveWeathering:processWheelContact(wheelDestruction, doClear)
+-- WheelDestruction.update fires once per wheel, independently - a 4-wheel
+-- tractor rolls every chance below 4 times per contact tick, an 8-wheel
+-- articulated truck 8 times. Without this, the dial's percentage was a
+-- lie: "20%" behaved like a much higher aggregate chance once you account
+-- for every wheel getting its own independent roll, which is exactly why
+-- driving anywhere looked like carpet-bombing dirt patches regardless of
+-- what the dial said. Dividing by wheel count keeps the dial's number
+-- roughly honest as "chance this happens somewhere on this pass",
+-- independent of how many wheels are doing the rolling.
+function ImmersiveWeathering:getVehicleWheelCount(vehicle)
+    local wheels = vehicle.spec_wheels ~= nil and vehicle.spec_wheels.wheels or nil
+    if wheels == nil or #wheels == 0 then
+        return 1
+    end
+    return #wheels
+end
+
+-- Clear, wither, and displace used to be three independent rolls against
+-- the same spot - meaning even at "20%" each, the real chance that
+-- SOMETHING happened to a given contact patch was close to
+-- 1-(0.8*0.8*0.8) ~= 49%, not 20%. One roll now decides at most one
+-- outcome per contact node, same mutually-exclusive weighted-pick shape
+-- as FOLIAGE_STATE_OPTIONS elsewhere in this file - the dial's percentage
+-- now actually means "chance this specific thing happens on this pass",
+-- not "chance this thing happens, ignoring whatever else might also fire
+-- on the same roll".
+function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
     local wheel = wheelDestruction.wheel
 
     if wheel.physics.contact ~= WheelContactType.GROUND then
@@ -2025,39 +2045,68 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, doClear)
         local centerX = (x1 + x2) * 0.5
         local centerZ = (z1 + z2) * 0.5
 
-        if doClear and self:fieldIsMaterial(
-            centerX,
-            centerZ,
-            WEATHERABLE_MATERIALS
-        ) then
-            local clearedName = self:getFoliageNameAt(centerX, centerZ)
-
-            FSDensityMapUtil.clearDecoArea(
-                x0,
-                z0,
-                x1,
-                z1,
-                x2,
-                z2
-            )
-
-            if clearedName ~= nil then
-                debugPrintf(
-                    "[TyreClear] wiped %s at (%.2f %.2f)",
-                    clearedName,
-                    centerX,
-                    centerZ
-                )
+        -- Theory: clearDecoArea silently doesn't touch "meadow"/
+        -- "forestGrass" (the base ambient ground-cover names) even though
+        -- it logs as if it succeeded - clearedName was only ever read
+        -- BEFORE the clear call, so a no-op look identical to a real wipe
+        -- in the log. "grassShort"/decoFoliage (what placeFoliage writes)
+        -- is a layer we've directly confirmed clearable and re-readable
+        -- all session. So: normalize first - write short grass over
+        -- whatever's there - then clear that known-clearable layer,
+        -- instead of trusting clearDecoArea against an arbitrary name.
+        local function clearFoliageAt(fx, fz, fx0, fz0, fx1, fz1, fx2, fz2, tag)
+            local clearedName = self:getFoliageNameAt(fx, fz)
+            if clearedName == nil then
+                return
             end
+
+            self:placeFoliage(fx, fz, GRASS_LOW_WRITE)
+            FSDensityMapUtil.clearDecoArea(fx0, fz0, fx1, fz1, fx2, fz2)
+
+            debugPrintf(
+                "[%s] wiped %s at (%.2f %.2f)",
+                tag,
+                clearedName,
+                fx,
+                fz
+            )
         end
 
-        local witherChance = self:getTyreWitherChance()
-        if witherChance > 0
-            and math.random() <= witherChance
-            and self:fieldIsMaterial(centerX, centerZ, GRASS_MATERIAL_ONLY)
+        -- Keeping an already-converted spot free of regrowing/leftover
+        -- deco isn't a balance knob the way wither/displace are - it's
+        -- upkeep, not a discovery mechanic, so it's unconditional rather
+        -- than rolled. Scoped to TERRAIN_REGROWTH_TARGETS (dirt/gravel
+        -- only) specifically, not WEATHERABLE_MATERIALS - that set also
+        -- includes plain GRASS, which made this fire on virtually every
+        -- frame of ordinary grass driving (1104 clear attempts in one
+        -- five-minute test), not just on ground we'd already converted.
+        if self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS) then
+            clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreClear")
+        end
+
+        -- Wither and displace used to share one mutually-exclusive roll,
+        -- which was needed back when clear was a third competitor in that
+        -- same roll (three overlapping chances against the same spot,
+        -- inflating the real aggregate chance well past the dial's stated
+        -- value). With clear pulled out above into its own unconditional
+        -- check, wither (grass-textured ground) and displace (off-field
+        -- bush deco) target essentially disjoint ground - a grass-
+        -- textured spot and an off-field bush cluster aren't normally the
+        -- same physical spot - so two independent rolls doesn't
+        -- reintroduce that bug.
+        if self:fieldIsMaterial(centerX, centerZ, GRASS_MATERIAL_ONLY)
+            and math.random() <= self:getTyreWitherChance() / wheelCount
         then
             local painted, materialName = self:paintWitherMaterial(centerX, centerZ)
             if painted then
+                -- Repainting the ground and the grass standing on it
+                -- disappearing are the same physical event, not two
+                -- independent dice - a tyre withering grass into a dirt
+                -- path naturally flattens whatever was growing there in
+                -- the same pass. Bundled here as one action/one dice
+                -- roll, not left to the unconditional check above to
+                -- mop up next frame.
+                clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither")
                 debugPrintf(
                     "[TyreWither] grass -> %s at (%.2f %.2f)",
                     materialName,
@@ -2067,10 +2116,18 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, doClear)
             end
         end
 
-        if math.random() <= TYRE_DISPLACE_CHANCE and not self:isOnField(centerX, centerZ) then
+        if not self:isOnField(centerX, centerZ)
+            and math.random() <= TYRE_DISPLACE_CHANCE / wheelCount
+        then
             local currentName = self:getFoliageNameAt(centerX, centerZ)
 
-            if currentName ~= nil and currentName ~= GRASS_LOW_READ then
+            -- Only an actual bush counts as "something to displace" -
+            -- currentName ~= GRASS_LOW_READ used to be the whole guard,
+            -- which also matched plain "meadow"/"forestGrass" ambient
+            -- ground cover (basically everywhere off-field), scattering
+            -- redundant grass on top of paths instead of only clearing
+            -- real deco bushes.
+            if currentName == BUSH then
                 if self:placeFoliage(centerX, centerZ, GRASS_LOW_WRITE) then
                     debugPrintf(
                         "[TyreDisplace] %s -> grass at (%.2f %.2f)",
@@ -2147,7 +2204,8 @@ function ImmersiveWeathering:onWheelDestructionUpdate(
     wheelDestruction.immersiveWeatheringDistance =
         distance % TYRE_CLEAR_DISTANCE
 
-    self:processWheelContact(wheelDestruction, math.random() <= TYRE_CLEAR_CHANCE)
+    local wheelCount = self:getVehicleWheelCount(vehicle)
+    self:processWheelContact(wheelDestruction, wheelCount)
 end
 
 WheelDestruction.update =
