@@ -317,6 +317,18 @@ local function buildTyrePanel(self)
                 value = string.format("%d%%", witherChance * 100),
                 color = {0.85, 0.75, 0.15},
             },
+            {
+                label = "Swap D/G",
+                keybind = getActionKeyLabel("IW_SWAP_DIRT_GRAVEL", "[Shift+G]"),
+                value = nil,
+                color = nil,
+            },
+            {
+                label = "Sow Grass",
+                keybind = getActionKeyLabel("IW_SOW_GRASS", "[Shift+S]"),
+                value = nil,
+                color = nil,
+            },
         },
     }
 end
@@ -536,6 +548,18 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
                 "toggle paint bias"
             )
             ImmersiveWeathering:refreshTyrePaintBiasLabel()
+
+            registerDebugAction(
+                InputAction.IW_SWAP_DIRT_GRAVEL,
+                ImmersiveWeathering.onSwapDirtGravelPressed,
+                "swap dirt/gravel"
+            )
+
+            registerDebugAction(
+                InputAction.IW_SOW_GRASS,
+                ImmersiveWeathering.onSowGrassPressed,
+                "sow grass"
+            )
         end
     )
 
@@ -578,6 +602,26 @@ function ImmersiveWeathering:onWeatherCrosshairPressed(
 )
     debugPrint("Immersive Weathering (FS25): weather crosshair key pressed")
     self:weatherAtCrosshair()
+end
+
+function ImmersiveWeathering:onSwapDirtGravelPressed(
+    actionName,
+    inputValue,
+    callbackState,
+    isAnalog
+)
+    debugPrint("Immersive Weathering (FS25): swap dirt/gravel key pressed")
+    self:swapDirtGravelAtCrosshair()
+end
+
+function ImmersiveWeathering:onSowGrassPressed(
+    actionName,
+    inputValue,
+    callbackState,
+    isAnalog
+)
+    debugPrint("Immersive Weathering (FS25): sow grass key pressed")
+    self:sowGrassAtCrosshair()
 end
 
 function ImmersiveWeathering:onFillAreaPressed(
@@ -874,6 +918,120 @@ function ImmersiveWeathering:weatherAtCrosshair()
     )
 end
 
+-- QOL manual override - dirt vs gravel is otherwise entirely up to the
+-- weighted palette roll (TYRE_PAINT_PALETTES), which means no way to fix
+-- a patch that landed on the "wrong" one short of waiting out more dice.
+-- Reads whatever material is actually at the crosshair and paints the
+-- other one over a small area - not a fixed target, so this works the
+-- same whether the spot is currently dirt or gravel. No-ops on anything
+-- that isn't dirt or gravel (grass, sand, stone, ...) - this is a
+-- dirt/gravel swap, not a general terrain painter.
+function ImmersiveWeathering:swapDirtGravelAtCrosshair()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+
+    raycastClosest(
+        x, y, z,
+        dirX, dirY, dirZ,
+        200,
+        "onDebugFieldRaycastCallback",
+        self,
+        CollisionFlag.TERRAIN
+    )
+
+    if self.debugFieldRaycastHit == nil then
+        debugPrint("[SwapMaterial] No terrain hit within raycast range")
+        return
+    end
+
+    local hx, _, hz = unpack(self.debugFieldRaycastHit)
+    local _, _, _, _, materialId = getTerrainAttributesAtWorldPos(g_terrainNode, hx, 0, hz, true, true, true, true, false)
+
+    local currentName, targetName
+    if materialId == MATERIAL.DIRT then
+        currentName, targetName = "DIRT", "GRAVEL"
+    elseif materialId == MATERIAL.GRAVEL then
+        currentName, targetName = "GRAVEL", "DIRT"
+    else
+        debugPrintf(
+            "[SwapMaterial] (%.2f %.2f) isn't dirt or gravel (material_id=%s) - nothing to swap",
+            hx, hz, tostring(materialId)
+        )
+        return
+    end
+
+    local layerId = self:getTerrainLayerIdByName(targetName)
+    if layerId == nil then
+        return
+    end
+
+    local half = AREA_FILL_SIZE * 0.5
+    for px = hx - half, hx + half, AREA_FILL_STEP do
+        for pz = hz - half, hz + half, AREA_FILL_STEP do
+            self:paintTerrainAtLayer(px, pz, layerId)
+        end
+    end
+
+    debugPrintf(
+        "[SwapMaterial] %dx%dm around (%.2f %.2f): %s -> %s",
+        AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, currentName, targetName
+    )
+end
+
+-- The nuclear reset - repaints GRASS over an area and sows short grass
+-- on top, no matter what's currently there. Unlike swapDirtGravel (dirt
+-- <-> gravel only) and applyTerrainRegrowth (dirt/gravel -> grass, ambient,
+-- one small step at a time), this doesn't check the current material at
+-- all - deliberately, since the actual use case is undoing a flat
+-- TerraFarm-painted concrete/asphalt square (a material this mod has no
+-- other read/write path for at all) as much as it is fixing an
+-- overworn meadow. If someone's unhappy with tyre ruts on their fields,
+-- this is the answer - manually reseed it back, same as a real farmer
+-- would, rather than needing a toggle to make ruts stop happening at all.
+function ImmersiveWeathering:sowGrassAtCrosshair()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+
+    raycastClosest(
+        x, y, z,
+        dirX, dirY, dirZ,
+        200,
+        "onDebugFieldRaycastCallback",
+        self,
+        CollisionFlag.TERRAIN
+    )
+
+    if self.debugFieldRaycastHit == nil then
+        debugPrint("[SowGrass] No terrain hit within raycast range")
+        return
+    end
+
+    local hx, _, hz = unpack(self.debugFieldRaycastHit)
+    local layerId = self:getTerrainLayerIdByName("GRASS")
+    if layerId == nil then
+        return
+    end
+
+    local half = AREA_FILL_SIZE * 0.5
+    for px = hx - half, hx + half, AREA_FILL_STEP do
+        for pz = hz - half, hz + half, AREA_FILL_STEP do
+            self:paintTerrainAtLayer(px, pz, layerId)
+            self:placeFoliage(px, pz, GRASS_LOW_WRITE)
+        end
+    end
+
+    debugPrintf(
+        "[SowGrass] %dx%dm around (%.2f %.2f): reseeded to grass",
+        AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz
+    )
+end
+
 -- For the "annoying bush" question: does densely surrounding it with
 -- grassShort do anything to it? Bet is no - everything tonight pointed at
 -- it not being part of the density-map system at all (plow/mow/deco-clear
@@ -1118,6 +1276,27 @@ function ImmersiveWeathering:placeFoliage(x, z, decoName)
     foliageSystem:applyDecoFoliage(decoName, x0, z0, x1, z1, x2, z2)
 
     debugPrint(string.format("%s to (%.2f %.2f)", decoName, x, z))
+    return true
+end
+
+-- Same write as placeFoliage, but into an exact caller-supplied
+-- parallelogram instead of placeFoliage's own randomized stamp. Exists
+-- for clearFoliageAt's normalize-then-clear step: writing a randomly
+-- sized/rotated stamp there and then clearing a *different* area (the
+-- tyre's own narrow contact quad) right after could leave part of the
+-- write outside what got cleared - confirmed as the actual cause of a
+-- "grass fountain" trailing behind a truck on a plain gravel road, not
+-- the normalize idea itself. Writing into the identical quad the clear
+-- call uses next means there's nothing left over by construction.
+function ImmersiveWeathering:placeFoliageInQuad(decoName, x0, z0, x1, z1, x2, z2)
+    decoName = decoName or "grassShort"
+
+    local foliageSystem = g_currentMission.foliageSystem
+    if not foliageSystem:getIsDecoLayerDefined(decoName) then
+        return false
+    end
+
+    foliageSystem:applyDecoFoliage(decoName, x0, z0, x1, z1, x2, z2)
     return true
 end
 
@@ -1924,6 +2103,104 @@ function ImmersiveWeathering:paintWitherMaterial(x, z)
     return true, materialName
 end
 
+-- Paints GRASS across a seeder's actual working swath instead of just
+-- the wheel's own narrow contact point - reads the vehicle's own
+-- <workAreas><workArea><area startNode=.../></workArea></workAreas>
+-- geometry (confirmed real tonight against two vehicle XMLs: amazone/
+-- precea4500 and FS25_HandPushableToolsPack's handSeeder_PL), the same
+-- three named nodes every ground-effect implement uses to define its
+-- work rectangle - start, plus a width-direction node and a height/
+-- length-direction node. Read-only: just getWorldTranslation on nodes
+-- that already exist, nothing hooked or wrapped, so a wrong field name
+-- just returns nil harmlessly (falls back to the caller's own single-
+-- point paint) instead of corrupting anything the way guessing at
+-- processSowingMachineArea's return contract did earlier tonight.
+-- Field names (spec_workArea.workAreas[i].start/.width/.height) are
+-- still unverified convention, not confirmed from source - pcall-wrapped
+-- at the call site for exactly that reason.
+--
+-- Confirmed wrong in practice: a combined disc/seeder implement has a
+-- cultivator work area AND a sowing work area, both using the same
+-- <area startNode=.../> schema - matching on start/width/height alone
+-- grabbed whichever came first (the disc section), painting the wrong
+-- swath entirely. Now requires workArea.type to positively match
+-- WorkAreaType.SOWINGMACHINE - if that global/member name turns out to
+-- be wrong, type just never matches anything, and this safely falls
+-- through to the caller's single-point fallback rather than guessing at
+-- "probably the first one".
+-- Terrain-only wasn't quite the final word - texture alone reads as bare
+-- dirt with a green tint until real foliage grows in on its own, which
+-- takes a nightly sweep or more. Placing short grass makes it read as
+-- sown immediately, same as the real effect. Scoped to genuinely empty
+-- spots only (getFoliageNameAt == nil) - not a blanket placeFoliage call,
+-- so it still never overwrites/replaces whatever's already growing there
+-- (a bush, existing deco, ...), matching "just want to replace dirt with
+-- grass" from earlier, extended to "and grass where there's nothing yet".
+function ImmersiveWeathering:sowGrassFoliageIfEmpty(x, z)
+    if self:getFoliageNameAt(x, z) == nil then
+        self:placeFoliage(x, z, GRASS_LOW_WRITE)
+    end
+end
+
+function ImmersiveWeathering:sowGrassAcrossWorkArea(vehicle, layerId)
+    local spec = vehicle.spec_workArea
+    if spec == nil or spec.workAreas == nil then
+        return false
+    end
+
+    if WorkAreaType == nil or WorkAreaType.SOWINGMACHINE == nil then
+        return false
+    end
+
+    for _, workArea in ipairs(spec.workAreas) do
+        local startNode = workArea.start
+        local widthNode = workArea.width
+        local heightNode = workArea.height
+
+        if workArea.type == WorkAreaType.SOWINGMACHINE
+            and startNode ~= nil and widthNode ~= nil and heightNode ~= nil
+        then
+            local sx, _, sz = getWorldTranslation(startNode)
+            local wx, _, wz = getWorldTranslation(widthNode)
+            local hx, _, hz = getWorldTranslation(heightNode)
+
+            local widthVecX, widthVecZ = wx - sx, wz - sz
+            local heightVecX, heightVecZ = hx - sx, hz - sz
+
+            local widthLen = math.sqrt(widthVecX * widthVecX + widthVecZ * widthVecZ)
+            local heightLen = math.sqrt(heightVecX * heightVecX + heightVecZ * heightVecZ)
+
+            -- A ridgemarker/other non-area workArea could in principle
+            -- still have odd leftover fields - a sane swath is at most a
+            -- few metres each way, anything wildly larger is a sign this
+            -- isn't the geometry we think it is, so skip rather than
+            -- paint half the map.
+            if widthLen > 0.05 and widthLen < 20 and heightLen > 0.05 and heightLen < 20 then
+                local widthSteps = math.max(1, math.floor(widthLen / AREA_FILL_STEP))
+                local heightSteps = math.max(1, math.floor(heightLen / AREA_FILL_STEP))
+
+                for i = 0, widthSteps do
+                    local tWidth = i / widthSteps
+                    for j = 0, heightSteps do
+                        local tHeight = j / heightSteps
+                        local px = sx + widthVecX * tWidth + heightVecX * tHeight
+                        local pz = sz + widthVecZ * tWidth + heightVecZ * tHeight
+
+                        if not self:isOnField(px, pz) and self:isSpotClearForFoliage(px, pz) then
+                            self:paintTerrainAtLayer(px, pz, layerId)
+                            self:sowGrassFoliageIfEmpty(px, pz)
+                        end
+                    end
+                end
+
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 -- Mirrors FOLIAGE_SPREAD_RULES but one layer down - terrain material
 -- instead of deco foliage. Grass reclaims an adjacent dirt/gravel patch
 -- over time, so tyre-withered ground (or any dirt/gravel) slowly grows
@@ -2045,29 +2322,78 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         local centerX = (x1 + x2) * 0.5
         local centerZ = (z1 + z2) * 0.5
 
-        -- The "normalize to grassShort, then clear that" trick only
-        -- belongs on the wither branch below, not here. Running it on
-        -- EVERY frame a tyre touches already-dirt/gravel ground (the
-        -- unconditional backstop) meant its write - a randomized 0.7-1.4m
-        -- stamp that doesn't reliably nest inside the tyre's own narrow
-        -- contact quad used for the clear call right after it - could
-        -- outrun the clear on a plain gravel road with only faint ambient
-        -- ground cover reading as "something", 30-60 times a second:
-        -- "pristine gravel road, grass behind me". Wither only fires once
-        -- per successful conversion, not every frame, so the same trick
-        -- there is a single deliberate write+clear, not a runaway one -
-        -- if there's foliage to clear, place short grass over it first so
-        -- clearDecoArea has a known-clearable layer to act on; otherwise
-        -- leave the spot alone entirely.
-        local function clearFoliageAt(fx, fz, fx0, fz0, fx1, fz1, fx2, fz2, tag, normalizeFirst)
+        -- A seeder's wheels "sow" grass instead of running the normal
+        -- wither/clear/displace tyre logic - reuses this same wheel-
+        -- contact hook that's been safe all night, rather than the real
+        -- SowingMachine.processSowingMachineArea (tried, broke real
+        -- seeders: its return value mattered to the engine's own
+        -- WorkArea loop, and nothing here calls into or wraps anything
+        -- the engine depends on, so there's nothing to get wrong that
+        -- way). Off-field only - a real seeder actually sowing a real
+        -- crop on a real field shouldn't also get grass painted
+        -- underneath it. Terrain material only, no placeFoliage call -
+        -- this replaces bare dirt with grass, it doesn't touch whatever
+        -- deco (bushes, clutter, ...) might already be standing there.
+        if wheelDestruction.vehicle.spec_sowingMachine ~= nil then
+            local seederVehicle = wheelDestruction.vehicle
+
+            -- isWorking (spec_sowingMachine), confirmed via a live field
+            -- dump, is the real signal on an actual working seeder
+            -- (Amazone Citan 15001-C) - not the tractor's engine (nearly
+            -- always on while driving, meaningless as a gate), not the
+            -- implement's own generic getIsTurnedOn, getIsLowered, or
+            -- getIsUnfolded (all confirmed uncorrelated with whether it's
+            -- actually sowing).
+            --
+            -- But confirmed via two more dumps spanning both fold states
+            -- that isWorking never goes true on FS25_HandPushableToolsPack's
+            -- hand-pushed implements at all - not a timing fluke, it's
+            -- categorically false for this vehicle type regardless of
+            -- what you do with it. Those declare a real, dedicated
+            -- <specialization name="pushHandTool"/> (confirmed straight
+            -- from that pack's own modDesc.xml) - simplest correct
+            -- answer is to treat "it's a hand tool" as its own always-on
+            -- case, since there's no meaningful activation state to gate
+            -- on at all: you're either pushing it (wheels grounded,
+            -- already required above) or you're not.
+            local seederIsOn = seederVehicle.spec_pushHandTool ~= nil
+                or seederVehicle.spec_sowingMachine.isWorking == true
+
+            local layerId = nil
+            if seederIsOn then
+                layerId = self:getTerrainLayerIdByName("GRASS")
+            end
+
+            if layerId ~= nil then
+                local success, coveredWorkArea = pcall(self.sowGrassAcrossWorkArea, self, seederVehicle, layerId)
+                if not success or not coveredWorkArea then
+                    if not self:isOnField(centerX, centerZ) and self:isSpotClearForFoliage(centerX, centerZ) then
+                        self:paintTerrainAtLayer(centerX, centerZ, layerId)
+                        self:sowGrassFoliageIfEmpty(centerX, centerZ)
+                    end
+                end
+            end
+        else
+
+        -- clearDecoArea alone doesn't reliably remove ambient "meadow"/
+        -- "forestGrass" - confirmed again by a spot that reads
+        -- Ground: GRAVEL, Foliage: meadow(4) and just never clears on its
+        -- own. Normalize-then-clear (write grassShort, then clear that
+        -- known-clearable layer) does work - the earlier "grass fountain"
+        -- on a plain gravel road wasn't caused by the normalize idea
+        -- itself, it was placeFoliage's write landing in its own randomly
+        -- rotated 0.7-1.4m stamp instead of the exact quad the clear call
+        -- covered right after, so part of the write could survive outside
+        -- it. placeFoliageInQuad writes into that identical quad instead,
+        -- so there's nothing left over by construction - safe to run on
+        -- every frame now, not just wither's single deliberate conversion.
+        local function clearFoliageAt(fx, fz, fx0, fz0, fx1, fz1, fx2, fz2, tag)
             local clearedName = self:getFoliageNameAt(fx, fz)
             if clearedName == nil then
                 return
             end
 
-            if normalizeFirst then
-                self:placeFoliage(fx, fz, GRASS_LOW_WRITE)
-            end
+            self:placeFoliageInQuad(GRASS_LOW_WRITE, fx0, fz0, fx1, fz1, fx2, fz2)
             FSDensityMapUtil.clearDecoArea(fx0, fz0, fx1, fz1, fx2, fz2)
 
             debugPrintf(
@@ -2088,7 +2414,34 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         -- frame of ordinary grass driving (1104 clear attempts in one
         -- five-minute test), not just on ground we'd already converted.
         if self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS) then
-            clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreClear", false)
+            clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreClear")
+        end
+
+        -- Material drift: driving over ground that's already dirt/gravel
+        -- re-rolls it against the current palette bias (same weighted
+        -- pick wither uses for fresh conversions), instead of leaving it
+        -- permanently whatever it first landed on. Without this, the only
+        -- way to fix a patch that came out the "wrong" material was the
+        -- manual crosshair swap (Shift+G) - useful for a quick spot fix,
+        -- but it meant an entire dirt road stayed dirt forever unless you
+        -- remembered to flip the bias *before* driving it, not after.
+        -- Reuses paintWitherMaterial as-is - same 90/10 weighting, so this
+        -- mostly converges toward the bias without becoming a flat single-
+        -- texture road, same organic-not-map-editor feel as everything
+        -- else here. Targets disjoint ground from wither (dirt/gravel vs
+        -- grass), so no aggregate-probability risk running alongside it.
+        if self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS)
+            and math.random() <= self:getTyreWitherChance() / wheelCount
+        then
+            local painted, materialName = self:paintWitherMaterial(centerX, centerZ)
+            if painted then
+                debugPrintf(
+                    "[TyreMaterialDrift] -> %s at (%.2f %.2f)",
+                    materialName,
+                    centerX,
+                    centerZ
+                )
+            end
         end
 
         -- Wither and displace used to share one mutually-exclusive roll,
@@ -2101,8 +2454,12 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         -- textured spot and an off-field bush cluster aren't normally the
         -- same physical spot - so two independent rolls doesn't
         -- reintroduce that bug.
+        -- isSpotClearForFoliage last - it's a real raycast, the others are
+        -- cheap field/roll checks, so only pay for it on the fraction of
+        -- frames that would otherwise actually succeed.
         if self:fieldIsMaterial(centerX, centerZ, GRASS_MATERIAL_ONLY)
             and math.random() <= self:getTyreWitherChance() / wheelCount
+            and self:isSpotClearForFoliage(centerX, centerZ)
         then
             local painted, materialName = self:paintWitherMaterial(centerX, centerZ)
             if painted then
@@ -2113,7 +2470,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
                 -- the same pass. Bundled here as one action/one dice
                 -- roll, not left to the unconditional check above to
                 -- mop up next frame.
-                clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither", true)
+                clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither")
                 debugPrintf(
                     "[TyreWither] grass -> %s at (%.2f %.2f)",
                     materialName,
@@ -2152,6 +2509,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
                     )
                 end
             end
+        end
         end
     end
 end
@@ -2234,3 +2592,30 @@ WheelDestruction.update =
             )
         end
     )
+
+-- ============================================================
+-- Seeder-on-meadow - reverted
+-- ============================================================
+
+-- Tried hooking SowingMachine.processSowingMachineArea via
+-- Utils.appendedFunction (real function name, confirmed against two
+-- real vehicle XMLs - amazone/precea4500 and FS25_HandPushableToolsPack's
+-- handSeeder_PL, both declaring <workArea type="sowingMachine"
+-- functionName="processSowingMachineArea">). Broke real seeders on
+-- first test: "WorkArea.lua:278: attempt to compare number < nil",
+-- spamming every frame. Root cause: this function's return value
+-- (changedArea/totalArea, same shape sowFruit already returns) is read
+-- by the engine's own WorkArea update loop right after the call -
+-- appendedFunction runs both the original and our function for their
+-- side effects but returns neither's result, so every call started
+-- returning nil where the engine expected a number. Our own pcall only
+-- protected our side of the hook, not the engine's subsequent use of
+-- the now-missing return value, so it corrupted that workArea's state
+-- for the rest of the session regardless.
+--
+-- The real fix would be Utils.overwrittenFunction instead - call the
+-- original via superFunc, capture and explicitly return its real
+-- result, and do our own thing as a side effect in between. Not
+-- attempting that live tonight after breaking a real vehicle once
+-- already; needs verifying the actual return contract first (ideally
+-- with real source access, not another guess) before trying again.

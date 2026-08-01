@@ -55,6 +55,18 @@
         <action name="IW_TOGGLE_TYRE_EFFECTS" axisType="HALF"/>
         <action name="IW_CYCLE_WITHER_CHANCE" axisType="HALF"/>
         <action name="IW_TOGGLE_PAINT_BIAS" axisType="HALF"/>
+        <!-- QOL manual override - swaps dirt<->gravel at the crosshair,
+             since the paint bias dial is a weighted roll, not a
+             guarantee, and there was previously no way to just fix a
+             patch that landed on the wrong one. -->
+        <action name="IW_SWAP_DIRT_GRAVEL" axisType="HALF"/>
+        <!-- The nuclear reset - unconditionally repaints grass + sows
+             short grass over an area at the crosshair, no matter what's
+             currently there (dirt, gravel, even a flat concrete/asphalt
+             square from a different mod's paint tool). Also the answer
+             for "tyre ruts scarred my meadow" - manually reseed it, same
+             as swap and clear are manual answers for their own gripes. -->
+        <action name="IW_SOW_GRASS" axisType="HALF"/>
     </actions>
 
     <inputBinding>
@@ -82,6 +94,12 @@
         <actionBinding action="IW_TOGGLE_PAINT_BIAS">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_v" index="1" />
         </actionBinding>
+        <actionBinding action="IW_SWAP_DIRT_GRAVEL">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_g" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_SOW_GRASS">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_s" index="1" />
+        </actionBinding>
     </inputBinding>
 
     <l10n>
@@ -102,6 +120,12 @@
         </text>
          <text name="input_IW_TOGGLE_PAINT_BIAS">
             <en>Tyre withering material</en>
+        </text>
+         <text name="input_IW_SWAP_DIRT_GRAVEL">
+            <en>Swap dirt/gravel at crosshair</en>
+        </text>
+         <text name="input_IW_SOW_GRASS">
+            <en>Sow grass at crosshair</en>
         </text>
      </l10n>
 </modDesc>
