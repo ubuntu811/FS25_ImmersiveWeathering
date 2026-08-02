@@ -26,6 +26,7 @@
         <sourceFile filename="scripts/UIHelper.lua" />
         <sourceFile filename="scripts/IWConfig.lua" />
         <sourceFile filename="scripts/IWSettingsUI.lua" />
+        <sourceFile filename="scripts/IWFoliagePalette.lua" />
         <sourceFile filename="scripts/ImmersiveWeathering.lua" />
     </extraSourceFiles>
 
@@ -55,8 +56,15 @@
     </actions>
 
     <inputBinding>
+        <!-- R itself is a hot letter in the base game's own vehicle scheme -
+             Shift+R ("Start Loading") AND Ctrl+Shift+R ("Collection Mode")
+             are BOTH already real pallet/bale-truck bindings, confirmed the
+             hard way twice in a row. Switched letter entirely rather than
+             stacking more modifiers onto R - K, avoiding the R/O/U/P
+             cluster already known bad from earlier tonight's keybind
+             collisions. -->
         <actionBinding action="IW_PLACE_TEST_RIG">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_r" index="1" />
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_lctrl KEY_k" index="1" />
         </actionBinding>
         <actionBinding action="IW_FILL_AREA">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_f" index="1" />

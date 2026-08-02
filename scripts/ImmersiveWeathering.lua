@@ -47,8 +47,9 @@ local TYRE_WITHER_LEVEL_LABELS = {
 -- dirt road, not a gravel one" are both real things to want. Toggle picks
 -- which one dominates; the 10% off-material is what keeps it from looking
 -- like a flat single-texture stamp either way. Same weighted-pick shape as
--- pickWeightedAction below, just a different domain, so kept as its own
--- tiny helper rather than forcing one function to serve both.
+-- IWFoliagePalette:pickFreshEntry, just a different domain (terrain
+-- material, not foliage), so kept as its own tiny helper rather than
+-- forcing one function to serve both.
 local TYRE_PAINT_PALETTES = {
     {label = "DIRT",   entries = {{weight = 0.9, name = "DIRT"},   {weight = 0.1, name = "GRAVEL"}}},
     {label = "GRAVEL", entries = {{weight = 0.9, name = "GRAVEL"}, {weight = 0.1, name = "DIRT"}}},
@@ -170,13 +171,12 @@ local GRASS_LOW_WRITE = "grassShort"
 local GRASS_LOW_READ = "decoFoliage"
 local EMPTY = "<empty>"
 -- "decoBush" (Layer 1, type 3) is confirmed in decoFoliages - real,
--- writable in principle, used for the weed accent and the pre-existing
--- map bush - but flaky this session (rejected every attempt). Left wired
--- up as a harmless no-op rather than ripped out, same reasoning as fruit
--- below: costs nothing to leave in case a future session behaves
--- differently, same unexplained flip we saw once already.
+-- writable in principle, used for the pre-existing map bush displace
+-- target - but flaky this session (rejected every attempt on this
+-- specific use). Left wired up as a harmless no-op rather than ripped
+-- out, same reasoning as fruit was kept in the old system: costs nothing
+-- to leave in case a future session behaves differently.
 local BUSH = "decoBush"
-local DECO_ACCENT = BUSH
 
 local NEIGHBOR_STEP = 1.0
 local NEIGHBOR_OFFSETS = {
@@ -185,65 +185,13 @@ local NEIGHBOR_OFFSETS = {
     {-1,  1}, {0,  1}, {1,  1},
 }
 
--- What a sampled spot may become next, keyed by what's there now. Each
--- state's options are mutually exclusive - one weighted pick, weights
--- don't need to sum to 1 (the remainder is "nothing happens"). Add rows
--- here for new transformations, and a matching action in
--- applyFoliageTransitions, instead of growing an if/elseif chain (e.g. a
--- future grass-paint <-> dirt-paint table for tyre wear would be the
--- same shape, walked the same way). "fruit" is effectively dead off-field
--- now (sowing never succeeds there, confirmed) - left in as a harmless
--- no-op alongside "weed", not removed, same reasoning as decoBush above.
-local FOLIAGE_STATE_OPTIONS = {
-    [EMPTY] = {
-        {weight = 0.05, action = "seed"},
-    },
-    [GRASS_LOW_READ] = {
-        {weight = 0.10, action = "weed"},   -- grassShort -> decoBush
-        {weight = 0.10, action = "fruit"},  -- grassShort -> a random crop, why not
-    },
-}
-
--- Spreading to a neighbor is orthogonal to what a patch itself becomes,
--- so it's rolled separately rather than as one of the mutually exclusive
--- options above - a patch can weed/fruit AND spread on the same visit.
--- encroachesOnGrass lets a spread claim a neighbor that already has grass
--- on it instead of requiring empty ground - bushes push grass out, grass
--- doesn't push anything out.
-local FOLIAGE_SPREAD_RULES = {
-    [GRASS_LOW_READ] = {
-        chance = 0.10,
-        place = function(self, x, z) return self:placeFoliage(x, z, GRASS_LOW_WRITE) end,
-    },
-    [BUSH] = {
-        chance = 0.05,
-        place = function(self, x, z) return self:placeFoliage(x, z, BUSH) end,
-        encroachesOnGrass = true,
-    },
-}
-
--- Same clustering idea, one layer down: terrain texture instead of deco
--- foliage. A sampled grass-material spot has a chance to reclaim one
--- dirt/gravel neighbor back to grass - this is what lets tyre-withered
--- paths grow back in from the edges if left unused, mirroring
--- FOLIAGE_SPREAD_RULES's shape rather than its table (keyed by material,
--- not foliage name, so it doesn't fit the same table without forcing it).
+-- Terrain texture's own regrowth (one layer down from foliage) - a
+-- sampled grass-material spot has a chance to reclaim one dirt/gravel
+-- neighbor back to grass. Not folded into the foliage palette - it's
+-- keyed by terrain material, not foliage name, a genuinely different
+-- domain from what IWFoliagePalette governs.
 local TERRAIN_REGROWTH_CHANCE = 0.5 -- temp bumped for testing, dial back down once regrowth is confirmed working
 local TERRAIN_REGROWTH_TARGETS = { [MATERIAL.DIRT] = true, [MATERIAL.GRAVEL] = true }
-
-local function pickWeightedAction(options)
-    local roll = math.random()
-    local cumulative = 0
-
-    for _, option in ipairs(options) do
-        cumulative = cumulative + option.weight
-        if roll <= cumulative then
-            return option.action
-        end
-    end
-
-    return nil
-end
 
 local function debugPrint(message)
     print("[ImmersiveWeathering] " .. tostring(message))
@@ -283,6 +231,10 @@ function ImmersiveWeathering:loadMap(_)
         TYRE_PAINT_PALETTE_LABELS,
         SWEEP_SAMPLE_COUNT_LABELS
     )
+
+    -- Loads the current map's own iw.xml if present (sibling to map.xml),
+    -- falls back to the built-in single-grassShort palette otherwise.
+    self.foliagePalette = IWFoliagePalette.new()
 
     self:refreshTyreEffectsLabel()
 
@@ -917,9 +869,9 @@ function ImmersiveWeathering:weatherAtCrosshair()
     local after = self:getFoliageNameAt(hx, hz) or EMPTY
 
     debugPrintf(
-        "[Weather] (%.2f %.2f) before=%s after=%s seeded=%d spread=%d weeded=%d fruited=%d regrown=%d",
+        "[Weather] (%.2f %.2f) before=%s after=%s seeded=%d spread=%d grown=%d mutated=%d regrown=%d",
         hx, hz, before, after,
-        stats.seeded or 0, stats.spread or 0, stats.weeded or 0, stats.fruited or 0, stats.regrown or 0
+        stats.seeded or 0, stats.spread or 0, stats.grown or 0, stats.mutated or 0, stats.regrown or 0
     )
 end
 
@@ -1269,9 +1221,13 @@ local function decodeFoliageBitsAt(layerData, x, z)
         return nil
     end
 
-    return layerData.types[typeIndex]
+    return layerData.types[typeIndex], value
 end
 
+-- Second return (growth-state value) is new - existing callers that only
+-- capture the name are unaffected, Lua just discards the extra value.
+-- Needed for palette growth tracking (bump-toward-stageMax on repeat
+-- hits), which requires knowing not just what's there but what stage.
 function ImmersiveWeathering:getFoliageNameAt(x, z)
     local data = self:loadFoliageDebugData()
 
@@ -1282,10 +1238,10 @@ function ImmersiveWeathering:getFoliageNameAt(x, z)
     self:resolveFoliagePlaneIds(data)
 
     for _, layerData in ipairs(data.multilayers) do
-        local name = decodeFoliageBitsAt(layerData, x, z)
+        local name, value = decodeFoliageBitsAt(layerData, x, z)
 
         if name ~= nil then
-            return name
+            return name, value
         end
     end
 
@@ -1354,88 +1310,129 @@ function ImmersiveWeathering:plantRandomFruit(x, z)
     return true
 end
 
--- Picks one mutually-exclusive outcome from FOLIAGE_STATE_OPTIONS for
--- whatever is at (x, z), then separately rolls FOLIAGE_SPREAD_RULES so
--- spreading can happen on the same visit as growing. New outcomes need a
--- table row above and one more branch here, not a new nested if/elseif
--- per existing state.
-function ImmersiveWeathering:runFoliageAction(action, x, z, stats)
-    if action == "seed" then
-        if self:fieldIsMaterial(x, z, WEATHERABLE_MATERIALS)
-            and self:isSpotClearForFoliage(x, z)
-            and self:placeFoliage(x, z, GRASS_LOW_WRITE)
-        then
-            stats.seeded = (stats.seeded or 0) + 1
-        end
-    elseif action == "weed" then
-        if not self:isOnField(x, z) and self:placeFoliage(x, z, DECO_ACCENT) then
-            stats.weeded = (stats.weeded or 0) + 1
-        end
-    elseif action == "fruit" then
-        if not self:isOnField(x, z) and self:plantRandomFruit(x, z) then
-            stats.fruited = (stats.fruited or 0) + 1
-        end
-    end
-end
-
 -- force=true skips every dice roll and tries everything possible for the
 -- sampled spot instead of one weighted pick - used by weatherAtCrosshair
 -- so a manual debug press always shows something instead of "nothing,
 -- try again" ~95% of the time on empty ground. The real sweep always
 -- calls this with force=false (or omitted) so ambient weathering stays
 -- genuinely rare - only the deliberate single-point tool is deterministic.
+-- Palette-driven replacement for the old hardcoded FOLIAGE_STATE_OPTIONS/
+-- FOLIAGE_SPREAD_RULES tables - see IWFoliagePalette.lua and the map's own
+-- iw.xml (or the built-in single-grassShort default on a map with none).
+-- Two rates the palette design itself doesn't cover are still module
+-- constants here rather than new config surface invented unprompted -
+-- flagged for retuning if the new balance doesn't feel right:
+--   - FOLIAGE_FRESH_PLACEMENT_CHANCE: matches the old EMPTY->seed 5%
+--     weight exactly, for genuinely empty ground.
+--   - FOLIAGE_SPREAD_CHANCE: matches the old grassShort spread rate (10%),
+--     applied uniformly to any entry flagged clusters=true, rather than
+--     trying to derive it from chance (already doing double duty for
+--     fresh-pick weight and growth rate - a third meaning would overload
+--     it further).
+-- Dropped from the old system: BUSH's "encroachesOnGrass" (could invade a
+-- neighbor that already had plain grass, not just empty ground) - the new
+-- schema has no dominance/hierarchy field, so spread now only claims
+-- genuinely empty neighbors for every entry uniformly. Flagging as a
+-- deliberate simplification, not an oversight.
+local FOLIAGE_FRESH_PLACEMENT_CHANCE = 0.05
+local FOLIAGE_SPREAD_CHANCE = 0.10
+
 function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force)
-    local name = self:getFoliageNameAt(x, z) or EMPTY
-    local options = FOLIAGE_STATE_OPTIONS[name]
+    local name, stage = self:getFoliageNameAt(x, z)
+    local entry = self.foliagePalette:findEntry(name)
 
-    if options ~= nil then
-        if force then
-            for _, option in ipairs(options) do
-                self:runFoliageAction(option.action, x, z, stats)
-            end
-        else
-            local action = pickWeightedAction(options)
+    if entry == nil then
+        -- Nothing here the palette recognizes - either truly empty, or
+        -- real content outside the configured palette (ambient map
+        -- decoration). Either way, only a fresh-placement roll applies,
+        -- same as EMPTY->seed used to be the only thing that fired here.
+        if name == nil and (force or math.random() <= FOLIAGE_FRESH_PLACEMENT_CHANCE) then
+            local freshEntry = self.foliagePalette:pickFreshEntry()
+            local freshStage = self.foliagePalette:pickInitialStage(freshEntry)
+            local writeName = self.foliagePalette:getWriteName(freshEntry, freshStage)
 
-            if action ~= nil then
-                self:runFoliageAction(action, x, z, stats)
+            if self:fieldIsMaterial(x, z, WEATHERABLE_MATERIALS)
+                and self:isSpotClearForFoliage(x, z)
+                and self:placeFoliage(x, z, writeName)
+            then
+                stats.seeded = (stats.seeded or 0) + 1
+                debugPrintf("[Palette] seeded %s at (%.2f %.2f)", writeName, x, z)
             end
+        end
+
+        return
+    end
+
+    -- Fields are never touched, full stop - matches the same principle
+    -- everywhere else in this file, even though something here physically
+    -- reads back as a recognized palette entry (a real farmed field can
+    -- read exactly like "meadow", same ambiguity noted elsewhere).
+    if self:isOnField(x, z) then
+        return
+    end
+
+    -- Growth: reuses this entry's own chance value as "how readily this
+    -- established patch progresses on a visit" - meadow (80%) grows far
+    -- more often than a 5%-weight accent species, which reads as a
+    -- reasonable "how dominant is this in the succession" analogy without
+    -- inventing a separate rate.
+    if force or math.random() * 100 <= entry.chance then
+        local nextStage = self.foliagePalette:growStage(entry, stage)
+        local writeName = self.foliagePalette:getWriteName(entry, nextStage)
+
+        if self:placeFoliage(x, z, writeName) then
+            stats.grown = (stats.grown or 0) + 1
+            debugPrintf("[Palette] grew %s -> %s at (%.2f %.2f)", name, writeName, x, z)
         end
     end
 
-    local spreadRule = FOLIAGE_SPREAD_RULES[name]
+    -- Succession: independent of growth above - an established patch can
+    -- grow AND mutate on the same visit, same "orthogonal rolls" shape the
+    -- old spread-vs-state-options split already used.
+    local mutateTarget = self.foliagePalette:rollMutation(entry)
 
-    -- spreadCandidates counts every sample that landed on ground the spread
-    -- table even cares about (existing grass/bush) - this is the number to
-    -- watch if "spread" stays at 0 for a while: it separates "the random
-    -- sampler almost never lands back on ground we already planted" (a real
-    -- probability problem, 1000 uniform samples across the whole map vs a
-    -- small planted footprint) from "it lands there fine but the neighbor
-    -- check keeps rejecting" (a logic problem).
-    if spreadRule ~= nil then
+    if mutateTarget ~= nil then
+        local mutateStage = self.foliagePalette:pickInitialStage(mutateTarget)
+        local writeName = self.foliagePalette:getWriteName(mutateTarget, mutateStage)
+
+        if self:placeFoliage(x, z, writeName) then
+            stats.mutated = (stats.mutated or 0) + 1
+            debugPrintf("[Palette] %s mutated -> %s at (%.2f %.2f)", name, writeName, x, z)
+        end
+    end
+
+    -- spreadCandidates counts every sample that landed on a clusters=true
+    -- entry - the number to watch if "spread" stays at 0 for a while: it
+    -- separates "the random sampler almost never lands back on ground we
+    -- already planted" (a real probability problem, 1000 uniform samples
+    -- across the whole map vs a small planted footprint) from "it lands
+    -- there fine but the neighbor check keeps rejecting" (a logic
+    -- problem).
+    if entry.clusters then
         stats.spreadCandidates = (stats.spreadCandidates or 0) + 1
 
-        if force or math.random() <= spreadRule.chance then
+        if force or math.random() <= FOLIAGE_SPREAD_CHANCE then
             local offset = NEIGHBOR_OFFSETS[math.random(#NEIGHBOR_OFFSETS)]
             local nx = x + offset[1] * NEIGHBOR_STEP
             local nz = z + offset[2] * NEIGHBOR_STEP
             local neighborName = self:getFoliageNameAt(nx, nz)
 
-            local canClaimNeighbor =
-                neighborName == nil
-                or (spreadRule.encroachesOnGrass and neighborName == GRASS_LOW_READ)
-
             debugPrintf(
                 "[Cluster] %s at (%.2f %.2f) -> neighbor (%.2f %.2f) reads %s, claimable=%s",
-                name, x, z, nx, nz, tostring(neighborName), tostring(canClaimNeighbor)
+                name, x, z, nx, nz, tostring(neighborName), tostring(neighborName == nil)
             )
 
-            if canClaimNeighbor
+            if neighborName == nil
                 and self:fieldIsMaterial(nx, nz, WEATHERABLE_MATERIALS)
                 and self:isSpotClearForFoliage(nx, nz)
-                and spreadRule.place(self, nx, nz)
             then
-                stats.spread = (stats.spread or 0) + 1
-                debugPrintf("[Cluster] spread %s -> (%.2f %.2f) succeeded", name, nx, nz)
+                local spreadStage = self.foliagePalette:pickInitialStage(entry)
+                local spreadWriteName = self.foliagePalette:getWriteName(entry, spreadStage)
+
+                if self:placeFoliage(nx, nz, spreadWriteName) then
+                    stats.spread = (stats.spread or 0) + 1
+                    debugPrintf("[Cluster] spread %s -> (%.2f %.2f) succeeded", spreadWriteName, nx, nz)
+                end
             end
         end
     end
@@ -1494,13 +1491,13 @@ function ImmersiveWeathering:runWeatheringSweep()
     local elapsedMs = (getTimeSec() - startTime) * 1000
 
     debugPrintf(
-            "Immersive Weathering (FS25): FINISHED %d samples, seeded=%d spread=%d (candidates=%d) weeded=%d fruited=%d regrown=%d, %.3f ms",
+            "Immersive Weathering (FS25): FINISHED %d samples, seeded=%d spread=%d (candidates=%d) grown=%d mutated=%d regrown=%d, %.3f ms",
             sampleCount,
             stats.seeded or 0,
             stats.spread or 0,
             stats.spreadCandidates or 0,
-            stats.weeded or 0,
-            stats.fruited or 0,
+            stats.grown or 0,
+            stats.mutated or 0,
             stats.regrown or 0,
             elapsedMs
         )
@@ -2023,9 +2020,14 @@ end
 -- so it still never overwrites/replaces whatever's already growing there
 -- (a bush, existing deco, ...), matching "just want to replace dirt with
 -- grass" from earlier, extended to "and grass where there's nothing yet".
+-- Palette-driven: places whatever entry is flagged seeder="true" in the
+-- current map's iw.xml (or the built-in grassShort default), at its
+-- configured seederLevel, instead of hardcoding grassShort.
 function ImmersiveWeathering:sowGrassFoliageIfEmpty(x, z)
     if self:getFoliageNameAt(x, z) == nil then
-        self:placeFoliage(x, z, GRASS_LOW_WRITE)
+        local entry = self.foliagePalette:getSeederEntry()
+        local writeName = self.foliagePalette:getWriteName(entry, entry.seederLevel)
+        self:placeFoliage(x, z, writeName)
     end
 end
 
@@ -2088,9 +2090,10 @@ function ImmersiveWeathering:sowGrassAcrossWorkArea(vehicle, layerId)
     return false
 end
 
--- Mirrors FOLIAGE_SPREAD_RULES but one layer down - terrain material
--- instead of deco foliage. Grass reclaims an adjacent dirt/gravel patch
--- over time, so tyre-withered ground (or any dirt/gravel) slowly grows
+-- Mirrors the clusters spread mechanic in applyFoliageTransitions but one
+-- layer down - terrain material instead of deco foliage. Grass reclaims
+-- an adjacent dirt/gravel patch over time, so tyre-withered ground (or
+-- any dirt/gravel) slowly grows
 -- back in from the edges instead of staying scarred forever. Same
 -- sample-then-check-a-neighbor shape as applyFoliageTransitions, kept as
 -- its own function since it operates on a completely different system
@@ -2156,7 +2159,7 @@ end
 -- SOMETHING happened to a given contact patch was close to
 -- 1-(0.8*0.8*0.8) ~= 49%, not 20%. One roll now decides at most one
 -- outcome per contact node, same mutually-exclusive weighted-pick shape
--- as FOLIAGE_STATE_OPTIONS elsewhere in this file - the dial's percentage
+-- as the palette's own growth roll elsewhere in this file - the dial's percentage
 -- now actually means "chance this specific thing happens on this pass",
 -- not "chance this thing happens, ignoring whatever else might also fire
 -- on the same roll".

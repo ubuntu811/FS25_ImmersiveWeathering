@@ -97,9 +97,11 @@ flags, etc.).
 
 ## Dev environment / build tooling
 
-See [docs/AI_DEV_GUIDE.md](docs/AI_DEV_GUIDE.md) - Windows+Steam+WSL+Claude
-Code setup, the `build.sh`/`deploy.sh` pattern, and a running list of real
-engine gotchas hit building this mod pair.
+Shared with WAILA - see
+[docs/AI_DEV_GUIDE.md](https://github.com/ubuntu811/FS25_whatAmILookingAt/blob/main/docs/AI_DEV_GUIDE.md)
+in that repo for Windows+Steam+WSL+Claude Code setup, the
+`build.sh`/`deploy.sh` pattern, and a running list of real engine gotchas
+hit building this mod pair.
 
 ## License
 
