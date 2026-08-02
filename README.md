@@ -95,6 +95,12 @@ in that repo for reverse-engineered notes on FS25 natives used by both
 mods (foliage density maps, terrain paint, tree planting, collision
 flags, etc.).
 
+## Dev environment / build tooling
+
+See [docs/AI_DEV_GUIDE.md](docs/AI_DEV_GUIDE.md) - Windows+Steam+WSL+Claude
+Code setup, the `build.sh`/`deploy.sh` pattern, and a running list of real
+engine gotchas hit building this mod pair.
+
 ## License
 
 GPLv3 - see [LICENSE](LICENSE).

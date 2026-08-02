@@ -33,6 +33,13 @@ local GRASS_MATERIAL_ONLY = { [MATERIAL.GRASS] = true }
 -- machine tools step through settings one keypress at a time.
 local TYRE_WITHER_LEVELS = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}
 local TYRE_WITHER_DEFAULT_INDEX = 2
+-- i18n keys, one per TYRE_WITHER_LEVELS entry, in the same order - for the
+-- settings-page choice control, which needs real text/keys, not just a
+-- raw index range.
+local TYRE_WITHER_LEVEL_LABELS = {
+    "iw_wither_pct_0", "iw_wither_pct_20", "iw_wither_pct_40",
+    "iw_wither_pct_60", "iw_wither_pct_80", "iw_wither_pct_100",
+}
 
 -- Rolled fresh per stamp instead of one fixed material, for a mottled,
 -- naturalistic look rather than a flat single-texture road - but still
@@ -47,6 +54,8 @@ local TYRE_PAINT_PALETTES = {
     {label = "GRAVEL", entries = {{weight = 0.9, name = "GRAVEL"}, {weight = 0.1, name = "DIRT"}}},
 }
 local TYRE_PAINT_PALETTE_DEFAULT_INDEX = 1
+-- i18n keys, one per TYRE_PAINT_PALETTES entry, in the same order.
+local TYRE_PAINT_PALETTE_LABELS = {"iw_material_dirt", "iw_material_gravel"}
 
 -- How many random coordinates each day-change sweep samples - was a fixed
 -- local before, now a toggle so a denser sweep can be tested without
@@ -54,6 +63,16 @@ local TYRE_PAINT_PALETTE_DEFAULT_INDEX = 1
 -- anyway - it's a once-per-day-change batch, not per-frame).
 local SWEEP_SAMPLE_COUNTS = {1000, 2000, 4000, 6000, 8000, 10000}
 local SWEEP_SAMPLE_COUNT_DEFAULT_INDEX = 1
+-- i18n keys, not the raw numbers - UIHelper's choice control returns the
+-- raw *value* for numeric entries but the *index* for string entries
+-- (its hasStrings flag), and sweepSampleCountIndex needs to stay an
+-- index (1..6) to match SWEEP_SAMPLE_COUNTS[index] lookups elsewhere in
+-- this file. Passing the numbers directly would have silently stored
+-- 1000/2000/etc. into the index field instead.
+local SWEEP_SAMPLE_COUNT_LABELS = {
+    "iw_samples_1000", "iw_samples_2000", "iw_samples_4000",
+    "iw_samples_6000", "iw_samples_8000", "iw_samples_10000",
+}
 
 local function pickPaintMaterial(entries)
     local roll = math.random()
@@ -94,20 +113,45 @@ local function getActionKeyLabel(actionName, fallback)
     return "[" .. table.concat(helpElement.keys, "+") .. "]"
 end
 
+-- VEHICLE deliberately excluded, unlike when this was sweep-only: this
+-- same raycast (isSpotClearForFoliage) is now also called from the tyre
+-- wither/seeder checks, which run at the exact spot a wheel is touching
+-- right now - the vehicle triggering the check would always see its own
+-- body directly above that point and permanently block itself. Confirmed
+-- as the actual cause of wither doing nothing at all regardless of
+-- chance: zero TyreWither log entries while TyreMaterialDrift/TyreClear
+-- (neither of which got this check) kept firing normally. The sweep
+-- samples random distant coordinates, so losing vehicle-exclusion there
+-- is a rare cosmetic edge case, not a real regression.
 local WEATHERING_COLLISION_FLAG_NAMES = {
-    "TERRAIN", "TREE", "VEHICLE", "VEHICLE_FORK",
+    "TERRAIN", "TREE", "VEHICLE_FORK",
     "STATIC_OBJECT", "DYNAMIC_OBJECT", "BUILDING", "ROAD", "ANIMAL"
 }
 
--- Every name confirmed in WAILA's Shift+K "decoFoliages" writable-layers
--- dump - the full real roster, not a guess.
-local TEST_RIG_DECO_NAMES = {
-    "decoFoliage", "decoBush", "decoFoliageEU", "decoBushUS",
-    "forestGrass", "forestBush", "forestPlants", "groundFoliage", "waterPlants",
+-- Grid map.xml test: every deco layer name x explicit <mapping> states
+-- 0-15 (15 = the real max for numChannels=4, 2^4-1). Originally 1-9 for
+-- all 9 layers plus a separate decoFoliage-only 0-15 sweep - widened
+-- uniformly after finding real content on decoFoliage's states 10-15 that
+-- a 1-9-only sweep would have missed on every other layer too.
+local TEST_RIG_GRID_LAYERS = {
+    "decoFoliage", "decoFoliageEU", "forestPlants", "waterPlants",
+    "decoBush", "decoBushUS", "groundFoliage", "forestGrass", "forestBush",
+    -- meadow was previously untestable this way (only a <paintableFoliage>
+    -- declaration, no <decoFoliage> one - confirmed via meadowL1-4 all
+    -- returning false). Now has both, testing whether that was the actual
+    -- blocker.
+    "meadow",
 }
+-- Declared numChannels=1 on the map (forestGrass/forestBush) - only states
+-- 0-1 are within their own declared range. Every other tested layer
+-- declares numChannels=4 (states 0-15 all in range), so they're absent
+-- here and TEST_RIG_GRID_MAX_STATE falls back to 15 for them.
+local TEST_RIG_GRID_MAX_STATE = {
+    forestGrass = 1,
+    forestBush = 1,
+}
+local TEST_RIG_GRID_STATES = 15
 local TEST_RIG_SPACING = 2.0
-local TEST_RIG_MEADOW_STATES = 9
-local TEST_RIG_DECO_REPEAT_LEVELS = 9
 local AREA_FILL_SIZE = 3.0
 local AREA_FILL_STEP = 0.5
 
@@ -227,14 +271,20 @@ function ImmersiveWeathering:loadMap(_)
     debugPrint("----------------------------------------------------------------------")
     debugPrint("Immersive Weathering (FS25): loadMap() called - initializing...")
 
-    self.tyreEffectsEnabled = true
-    self.tyreWitherLevelIndex = TYRE_WITHER_DEFAULT_INDEX
-    self.tyrePaintPaletteIndex = TYRE_PAINT_PALETTE_DEFAULT_INDEX
-    self.sweepSampleCountIndex = SWEEP_SAMPLE_COUNT_DEFAULT_INDEX
+    self.config = IWConfig.new(
+        TYRE_WITHER_DEFAULT_INDEX,
+        TYRE_PAINT_PALETTE_DEFAULT_INDEX,
+        SWEEP_SAMPLE_COUNT_DEFAULT_INDEX
+    )
+
+    self.settingsUI = IWSettingsUI.new(
+        self.config,
+        TYRE_WITHER_LEVEL_LABELS,
+        TYRE_PAINT_PALETTE_LABELS,
+        SWEEP_SAMPLE_COUNT_LABELS
+    )
 
     self:refreshTyreEffectsLabel()
-    self:refreshTyreWitherLabel()
-    self:refreshTyrePaintBiasLabel()
 
     g_messageCenter:subscribe(
         MessageType.DAY_CHANGED,
@@ -277,10 +327,19 @@ end
 -- ~0.51 band between the quickbar and the date/money bar.
 local HUD_LEFT_FALLBACK = 0.20
 local HUD_TOP = 0.98
-local HUD_PANEL_WIDTH = 0.19
+-- Narrowed from 0.19: at 0.19x2 + WAILA's mini panel + gaps, the combined
+-- row reached to x=0.685, which collides with the base game's own
+-- top-right cluster (calendar/compass/money) on at least one confirmed
+-- resolution. 0.17 buys real margin.
+local HUD_PANEL_WIDTH = 0.17
 local HUD_PANEL_GAP = 0.010
-local HUD_PANEL_HEADER_HEIGHT = 0.040
-local HUD_PANEL_BODY_HEIGHT = 0.072
+-- Matches WailaHud's miniHeight (0.036 header + 0.062 body = 0.098) exactly
+-- so both panels share the same total height and therefore the same
+-- bottom Y, given they both anchor to the same HUD_TOP. Previously
+-- 0.040/0.072 (0.112 total) - WAILA's summary line and IW's swatch/value
+-- row sat at genuinely different heights despite looking like one row.
+local HUD_PANEL_HEADER_HEIGHT = 0.036
+local HUD_PANEL_BODY_HEIGHT = 0.062
 local HUD_PANEL_HEIGHT = HUD_PANEL_HEADER_HEIGHT + HUD_PANEL_BODY_HEIGHT
 local HUD_TITLE_SIZE = 0.016
 local HUD_LABEL_SIZE = 0.0135
@@ -297,37 +356,33 @@ local HUD_SWATCH_SIZE = 0.016
 -- panel should be; a small color chip communicates the same category/
 -- state info without the width.
 local function buildTyrePanel(self)
-    local material = TYRE_PAINT_PALETTES[self.tyrePaintPaletteIndex].label
+    local material = TYRE_PAINT_PALETTES[self.config:getTyrePaintPaletteIndex()].label
     local witherChance = self:getTyreWitherChance()
 
     return {
         title = "TYRE WITHERING",
         headerKeybind = getActionKeyLabel("IW_TOGGLE_TYRE_EFFECTS", "[Shift+T]"),
-        headerColor = self.tyreEffectsEnabled and {0.25, 0.75, 0.25} or {0.75, 0.25, 0.25},
+        headerColor = self.config:isTyreEffectsEnabled() and {0.25, 0.75, 0.25} or {0.75, 0.25, 0.25},
+        -- Texture/Chance are now Settings-page controls (the keybinds
+        -- that used to cycle these are retired below) - keybind left nil
+        -- since there's genuinely no key to press anymore, but the label
+        -- stays: dropping it too left a bare swatch+number with no way to
+        -- tell what it was measuring. Swap D/G and Sow Grass are gone
+        -- entirely, not just re-labeled - both fully superseded by
+        -- automatic mechanics (material drift, the seeder feature) that
+        -- do the same thing without a manual key.
         cells = {
             {
                 label = "Texture",
-                keybind = getActionKeyLabel("IW_TOGGLE_PAINT_BIAS", "[Shift+V]"),
+                keybind = nil,
                 value = material,
                 color = material == "DIRT" and {0.55, 0.35, 0.15} or {0.55, 0.55, 0.55},
             },
             {
                 label = "Chance",
-                keybind = getActionKeyLabel("IW_CYCLE_WITHER_CHANCE", "[Shift+B]"),
+                keybind = nil,
                 value = string.format("%d%%", witherChance * 100),
                 color = {0.85, 0.75, 0.15},
-            },
-            {
-                label = "Swap D/G",
-                keybind = getActionKeyLabel("IW_SWAP_DIRT_GRAVEL", "[Shift+G]"),
-                value = nil,
-                color = nil,
-            },
-            {
-                label = "Sow Grass",
-                keybind = getActionKeyLabel("IW_SOW_GRASS", "[Shift+S]"),
-                value = nil,
-                color = nil,
             },
         },
     }
@@ -337,10 +392,12 @@ local function buildSweepPanel(self)
     return {
         title = "NIGHTLY WEATHERING LOOPS",
         headerKeybind = nil,
+        -- Samples is now a Settings-page control too - same read-only
+        -- treatment as Texture/Chance above (label stays, keybind doesn't).
         cells = {
             {
                 label = "Samples",
-                keybind = getActionKeyLabel("IW_TOGGLE_SAMPLE_COUNT", "[Shift+I]"),
+                keybind = nil,
                 value = tostring(self:getSweepSampleCount()),
                 color = {0.85, 0.75, 0.15},
             },
@@ -392,25 +449,42 @@ local function drawHudPanel(left, panel)
         local cellLeft = left + (index - 1) * cellWidth
         local textLeft = cellLeft + 0.008
 
-        setTextColor(1, 1, 1, 1)
-        renderText(textLeft, bodyTop - 0.018, HUD_LABEL_SIZE, cell.label)
+        -- label nil means "read-only status, adjust it in Settings"
+        -- (Texture/Chance/Samples) rather than "press this key" - skip the
+        -- label line and let the swatch+value sit roughly centered instead
+        -- of pinned to the bottom under empty space.
+        if cell.label ~= nil then
+            setTextColor(1, 1, 1, 1)
+            renderText(textLeft, bodyTop - 0.018, HUD_LABEL_SIZE, cell.label)
+        end
 
-        setTextColor(0.65, 0.65, 0.65, 1)
-        renderText(textLeft, bodyTop - 0.030, HUD_KEYBIND_SIZE, cell.keybind)
-
+        -- Value and keybind both render on this same bottom content row
+        -- (panelBottom + 0.018) rather than keybind getting its own line
+        -- under the label - matches WAILA's mini-panel summary line at the
+        -- identical Y (see WailaHud:drawMini), so the whole HUD row reads
+        -- as one consistent baseline instead of some cells' content
+        -- sitting at a different height than others'. No cell currently
+        -- sets both value and keybind, so this never has to choose between
+        -- them.
         if cell.value ~= nil then
             local swatchBottom = panelBottom + 0.014
+            if cell.label == nil and cell.keybind == nil then
+                swatchBottom = panelBottom + (HUD_PANEL_BODY_HEIGHT - HUD_SWATCH_SIZE) * 0.5
+            end
 
             drawFilledRect(textLeft, swatchBottom, HUD_SWATCH_SIZE, HUD_SWATCH_SIZE, cell.color[1], cell.color[2], cell.color[3], 1)
 
             setTextColor(1, 1, 1, 1)
             renderText(textLeft + HUD_SWATCH_SIZE + 0.006, swatchBottom + 0.004, HUD_VALUE_SIZE, cell.value)
+        elseif cell.keybind ~= nil then
+            setTextColor(0.65, 0.65, 0.65, 1)
+            renderText(textLeft, panelBottom + 0.018, HUD_KEYBIND_SIZE, cell.keybind)
         end
     end
 end
 
 function ImmersiveWeathering:draw()
-    if self.tyreEffectsEnabled == nil then
+    if self.config == nil then
         return
     end
 
@@ -451,6 +525,29 @@ function ImmersiveWeathering:draw()
 end
 
 addModEventListener(ImmersiveWeathering)
+
+-- ============================================================
+-- Settings page injection
+-- ============================================================
+
+-- InGameMenu.onMenuOpened, not BaseMission.loadMapFinished - switched
+-- after confirming against FS25_AdditionalContracts (an actually working,
+-- installed mod doing the same thing): loadMapFinished fires once the map
+-- is done loading, but that's apparently too early for the settings
+-- page's own GUI elements (gameSettingsLayout etc.) to exist yet.
+-- onMenuOpened only fires once the player actually opens the ESC menu, by
+-- which point everything's guaranteed built. injectUiSettings() is
+-- already idempotent (self.isInitialized guard) so appending this
+-- unconditionally on every menu open is safe - it only actually builds
+-- controls the first time.
+InGameMenu.onMenuOpened = Utils.appendedFunction(
+    InGameMenu.onMenuOpened,
+    function(...)
+        if ImmersiveWeathering.settingsUI ~= nil then
+            ImmersiveWeathering.settingsUI:injectUiSettings()
+        end
+    end
+)
 
 -- ============================================================
 -- Debug hotkeys
@@ -511,6 +608,18 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
             end
 
             registerDebugAction(
+                InputAction.IW_PLACE_TEST_RIG,
+                ImmersiveWeathering.onPlaceTestRigPressed,
+                "place test rig"
+            )
+
+            registerDebugAction(
+                InputAction.IW_FILL_AREA,
+                ImmersiveWeathering.onFillAreaPressed,
+                "fill area"
+            )
+
+            registerDebugAction(
                 InputAction.IW_WEATHER_CROSSHAIR,
                 ImmersiveWeathering.onWeatherCrosshairPressed,
                 "weather crosshair"
@@ -522,44 +631,21 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
                 "run sweep"
             )
 
-            registerDebugAction(
-                InputAction.IW_TOGGLE_SAMPLE_COUNT,
-                ImmersiveWeathering.onToggleSampleCountPressed,
-                "toggle sample count"
-            )
-
+            -- IW_TOGGLE_SAMPLE_COUNT, IW_CYCLE_WITHER_CHANCE and
+            -- IW_TOGGLE_PAINT_BIAS are retired - no action, no binding, no
+            -- l10n in modDesc.xml. Sample count/wither chance/paint bias
+            -- now live on the Settings page instead of a cycle key, via
+            -- IWSettingsUI's autoBind controls writing straight to
+            -- self.config. IW_SWAP_DIRT_GRAVEL/IW_SOW_GRASS and their
+            -- handlers were removed outright (not just unwired) - fully
+            -- superseded by automatic mechanics (material drift, the
+            -- seeder feature) that do the same job without a manual key.
             ImmersiveWeathering.tyreEffectsActionEventId = registerDebugAction(
                 InputAction.IW_TOGGLE_TYRE_EFFECTS,
                 ImmersiveWeathering.onToggleTyreEffectsPressed,
                 "toggle tyre effects"
             )
             ImmersiveWeathering:refreshTyreEffectsLabel()
-
-            ImmersiveWeathering.tyreWitherActionEventId = registerDebugAction(
-                InputAction.IW_CYCLE_WITHER_CHANCE,
-                ImmersiveWeathering.onCycleWitherChancePressed,
-                "cycle wither chance"
-            )
-            ImmersiveWeathering:refreshTyreWitherLabel()
-
-            ImmersiveWeathering.tyrePaintBiasActionEventId = registerDebugAction(
-                InputAction.IW_TOGGLE_PAINT_BIAS,
-                ImmersiveWeathering.onTogglePaintBiasPressed,
-                "toggle paint bias"
-            )
-            ImmersiveWeathering:refreshTyrePaintBiasLabel()
-
-            registerDebugAction(
-                InputAction.IW_SWAP_DIRT_GRAVEL,
-                ImmersiveWeathering.onSwapDirtGravelPressed,
-                "swap dirt/gravel"
-            )
-
-            registerDebugAction(
-                InputAction.IW_SOW_GRASS,
-                ImmersiveWeathering.onSowGrassPressed,
-                "sow grass"
-            )
         end
     )
 
@@ -604,26 +690,6 @@ function ImmersiveWeathering:onWeatherCrosshairPressed(
     self:weatherAtCrosshair()
 end
 
-function ImmersiveWeathering:onSwapDirtGravelPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    debugPrint("Immersive Weathering (FS25): swap dirt/gravel key pressed")
-    self:swapDirtGravelAtCrosshair()
-end
-
-function ImmersiveWeathering:onSowGrassPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    debugPrint("Immersive Weathering (FS25): sow grass key pressed")
-    self:sowGrassAtCrosshair()
-end
-
 function ImmersiveWeathering:onFillAreaPressed(
     actionName,
     inputValue,
@@ -644,32 +710,12 @@ end
 -- lifecycle events with no guaranteed order - whichever finishes second
 -- is the one that actually paints the initial label.
 function ImmersiveWeathering:refreshTyreEffectsLabel()
-    if self.tyreEffectsActionEventId == nil or self.tyreEffectsEnabled == nil then
+    if self.tyreEffectsActionEventId == nil or self.config == nil then
         return
     end
     g_inputBinding:setActionEventText(
         self.tyreEffectsActionEventId,
-        string.format("Tyre dmg: %s", self.tyreEffectsEnabled and "ON" or "OFF")
-    )
-end
-
-function ImmersiveWeathering:refreshTyreWitherLabel()
-    if self.tyreWitherActionEventId == nil or self.tyreWitherLevelIndex == nil then
-        return
-    end
-    g_inputBinding:setActionEventText(
-        self.tyreWitherActionEventId,
-        string.format("Dmg %%: %d%%", self:getTyreWitherChance() * 100)
-    )
-end
-
-function ImmersiveWeathering:refreshTyrePaintBiasLabel()
-    if self.tyrePaintBiasActionEventId == nil or self.tyrePaintPaletteIndex == nil then
-        return
-    end
-    g_inputBinding:setActionEventText(
-        self.tyrePaintBiasActionEventId,
-        string.format("Dmg mat: %s", TYRE_PAINT_PALETTES[self.tyrePaintPaletteIndex].label)
+        string.format("Tyre dmg: %s", self.config:isTyreEffectsEnabled() and "ON" or "OFF")
     )
 end
 
@@ -679,39 +725,11 @@ function ImmersiveWeathering:onToggleTyreEffectsPressed(
     callbackState,
     isAnalog
 )
-    self.tyreEffectsEnabled = not self.tyreEffectsEnabled
+    self.config:toggleTyreEffectsEnabled()
     self:refreshTyreEffectsLabel()
     debugPrintf(
         "Immersive Weathering (FS25): tyre effects (clear/wither/displace) %s",
-        self.tyreEffectsEnabled and "ENABLED" or "DISABLED"
-    )
-end
-
-function ImmersiveWeathering:onCycleWitherChancePressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    self.tyreWitherLevelIndex = (self.tyreWitherLevelIndex % #TYRE_WITHER_LEVELS) + 1
-    self:refreshTyreWitherLabel()
-    debugPrintf(
-        "Immersive Weathering (FS25): tyre wither chance -> %d%%",
-        self:getTyreWitherChance() * 100
-    )
-end
-
-function ImmersiveWeathering:onTogglePaintBiasPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    self.tyrePaintPaletteIndex = (self.tyrePaintPaletteIndex % #TYRE_PAINT_PALETTES) + 1
-    self:refreshTyrePaintBiasLabel()
-    debugPrintf(
-        "Immersive Weathering (FS25): tyre paint palette -> %s (90/10)",
-        TYRE_PAINT_PALETTES[self.tyrePaintPaletteIndex].label
+        self.config:isTyreEffectsEnabled() and "ENABLED" or "DISABLED"
     )
 end
 
@@ -723,19 +741,6 @@ function ImmersiveWeathering:onRunSweepPressed(
 )
     debugPrint("Immersive Weathering (FS25): run sweep key pressed")
     self:runWeatheringSweep()
-end
-
-function ImmersiveWeathering:onToggleSampleCountPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    self.sweepSampleCountIndex = (self.sweepSampleCountIndex % #SWEEP_SAMPLE_COUNTS) + 1
-    debugPrintf(
-        "Immersive Weathering (FS25): sweep sample count -> %d",
-        self:getSweepSampleCount()
-    )
 end
 
 function ImmersiveWeathering:onDayChanged()
@@ -918,120 +923,6 @@ function ImmersiveWeathering:weatherAtCrosshair()
     )
 end
 
--- QOL manual override - dirt vs gravel is otherwise entirely up to the
--- weighted palette roll (TYRE_PAINT_PALETTES), which means no way to fix
--- a patch that landed on the "wrong" one short of waiting out more dice.
--- Reads whatever material is actually at the crosshair and paints the
--- other one over a small area - not a fixed target, so this works the
--- same whether the spot is currently dirt or gravel. No-ops on anything
--- that isn't dirt or gravel (grass, sand, stone, ...) - this is a
--- dirt/gravel swap, not a general terrain painter.
-function ImmersiveWeathering:swapDirtGravelAtCrosshair()
-    local camera = g_cameraManager:getActiveCamera()
-    local x, y, z = getWorldTranslation(camera)
-    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
-
-    self.debugFieldRaycastHit = nil
-
-    raycastClosest(
-        x, y, z,
-        dirX, dirY, dirZ,
-        200,
-        "onDebugFieldRaycastCallback",
-        self,
-        CollisionFlag.TERRAIN
-    )
-
-    if self.debugFieldRaycastHit == nil then
-        debugPrint("[SwapMaterial] No terrain hit within raycast range")
-        return
-    end
-
-    local hx, _, hz = unpack(self.debugFieldRaycastHit)
-    local _, _, _, _, materialId = getTerrainAttributesAtWorldPos(g_terrainNode, hx, 0, hz, true, true, true, true, false)
-
-    local currentName, targetName
-    if materialId == MATERIAL.DIRT then
-        currentName, targetName = "DIRT", "GRAVEL"
-    elseif materialId == MATERIAL.GRAVEL then
-        currentName, targetName = "GRAVEL", "DIRT"
-    else
-        debugPrintf(
-            "[SwapMaterial] (%.2f %.2f) isn't dirt or gravel (material_id=%s) - nothing to swap",
-            hx, hz, tostring(materialId)
-        )
-        return
-    end
-
-    local layerId = self:getTerrainLayerIdByName(targetName)
-    if layerId == nil then
-        return
-    end
-
-    local half = AREA_FILL_SIZE * 0.5
-    for px = hx - half, hx + half, AREA_FILL_STEP do
-        for pz = hz - half, hz + half, AREA_FILL_STEP do
-            self:paintTerrainAtLayer(px, pz, layerId)
-        end
-    end
-
-    debugPrintf(
-        "[SwapMaterial] %dx%dm around (%.2f %.2f): %s -> %s",
-        AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, currentName, targetName
-    )
-end
-
--- The nuclear reset - repaints GRASS over an area and sows short grass
--- on top, no matter what's currently there. Unlike swapDirtGravel (dirt
--- <-> gravel only) and applyTerrainRegrowth (dirt/gravel -> grass, ambient,
--- one small step at a time), this doesn't check the current material at
--- all - deliberately, since the actual use case is undoing a flat
--- TerraFarm-painted concrete/asphalt square (a material this mod has no
--- other read/write path for at all) as much as it is fixing an
--- overworn meadow. If someone's unhappy with tyre ruts on their fields,
--- this is the answer - manually reseed it back, same as a real farmer
--- would, rather than needing a toggle to make ruts stop happening at all.
-function ImmersiveWeathering:sowGrassAtCrosshair()
-    local camera = g_cameraManager:getActiveCamera()
-    local x, y, z = getWorldTranslation(camera)
-    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
-
-    self.debugFieldRaycastHit = nil
-
-    raycastClosest(
-        x, y, z,
-        dirX, dirY, dirZ,
-        200,
-        "onDebugFieldRaycastCallback",
-        self,
-        CollisionFlag.TERRAIN
-    )
-
-    if self.debugFieldRaycastHit == nil then
-        debugPrint("[SowGrass] No terrain hit within raycast range")
-        return
-    end
-
-    local hx, _, hz = unpack(self.debugFieldRaycastHit)
-    local layerId = self:getTerrainLayerIdByName("GRASS")
-    if layerId == nil then
-        return
-    end
-
-    local half = AREA_FILL_SIZE * 0.5
-    for px = hx - half, hx + half, AREA_FILL_STEP do
-        for pz = hz - half, hz + half, AREA_FILL_STEP do
-            self:paintTerrainAtLayer(px, pz, layerId)
-            self:placeFoliage(px, pz, GRASS_LOW_WRITE)
-        end
-    end
-
-    debugPrintf(
-        "[SowGrass] %dx%dm around (%.2f %.2f): reseeded to grass",
-        AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz
-    )
-end
-
 -- For the "annoying bush" question: does densely surrounding it with
 -- grassShort do anything to it? Bet is no - everything tonight pointed at
 -- it not being part of the density-map system at all (plow/mow/deco-clear
@@ -1078,11 +969,8 @@ function ImmersiveWeathering:placeFoliageAreaFill()
 end
 
 -- Deterministic test rig: no dice rolls, no waiting on the sweep to find
--- the right spot. Places one row of every confirmed-writable deco species
--- (TEST_RIG_DECO_NAMES, straight from WAILA's Shift+K writable-layers
--- dump) and a second row of meadow at explicit growth states 1-9, all at
--- once, all logged with exact positions - so "is this texture difference
--- just a growth-state thing" is a direct visual comparison, not a guess.
+-- the right spot. Places the layer x state (0-15) mapping grid at an
+-- exact, logged position in front of the camera.
 function ImmersiveWeathering:placeFoliageTestRig()
     local camera = g_cameraManager:getActiveCamera()
     local x, y, z = getWorldTranslation(camera)
@@ -1106,45 +994,59 @@ function ImmersiveWeathering:placeFoliageTestRig()
 
     local hx, _, hz = unpack(self.debugFieldRaycastHit)
 
-    debugPrint("[TestRig] --- deco/paintable species row ---")
-    for i, name in ipairs(TEST_RIG_DECO_NAMES) do
-        local px = hx + (i - 1) * TEST_RIG_SPACING
-        local ok = self:placeFoliage(px, hz, name)
-        debugPrintf("[TestRig] [%d] %s at (%.2f %.2f) -> %s", i, name, px, hz, tostring(ok))
+    -- The species row, meadow growth-state row, and grassShort repeat-stamp
+    -- row that used to run here were one-off exploratory checks - each
+    -- already answered its question tonight, trimmed once they stopped
+    -- earning their log/screen clutter. This grid is the one part worth
+    -- keeping. States 0-15 now for every layer (was 1-9, plus a
+    -- decoFoliage-only 0-15 sweep as a separate row - merged after real
+    -- content turned up on decoFoliage's 10-15 that a 1-9-only sweep would
+    -- have missed on every other layer too).
+    debugPrint("[TestRig] --- mapping grid (layer rows x state 0-15 columns) ---")
+    local concreteLayerId = self:getTerrainLayerIdByName("CONCRETEINDUSTRIAL")
+
+    for row, layerName in ipairs(TEST_RIG_GRID_LAYERS) do
+        local pz = hz + (row - 1) * TEST_RIG_SPACING
+        local maxState = TEST_RIG_GRID_MAX_STATE[layerName] or TEST_RIG_GRID_STATES
+
+        for state = 0, TEST_RIG_GRID_STATES do
+            local px = hx + state * TEST_RIG_SPACING
+            local name = layerName .. "_s" .. state
+            local ok = self:placeFoliage(px, pz, name)
+            debugPrintf("[TestRig] [grid %s x%d] %s at (%.2f %.2f) -> %s", layerName, state, name, px, pz, tostring(ok))
+
+            -- Out-of-this-layer's-own-declared-range marker: paint the
+            -- ground CONCRETE so "nothing here" reads as "expected, this
+            -- state is outside numChannels" at a glance, distinct from an
+            -- in-range state that unexpectedly produced nothing.
+            if state > maxState and concreteLayerId ~= nil then
+                self:paintTerrainAtLayer(px, pz, concreteLayerId)
+            end
+        end
     end
 
-    debugPrint("[TestRig] --- meadow growth-state row ---")
-    local meadowIndex = self:getMeadowFruitTypeIndex()
+    -- Visual border around the whole grid's actual bounding box (9 rows x
+    -- 16 cols = 16x30m, +1m margin) - painted in CONCRETE so the real
+    -- placement extent is visible from above at a glance instead of
+    -- guessed from screenshots.
+    local borderMargin = 1.0
+    local borderMinX = hx - borderMargin
+    local borderMaxX = hx + TEST_RIG_GRID_STATES * TEST_RIG_SPACING + borderMargin
+    local borderMinZ = hz - borderMargin
+    local borderMaxZ = hz + (#TEST_RIG_GRID_LAYERS - 1) * TEST_RIG_SPACING + borderMargin
 
-    if meadowIndex == nil then
-        debugPrint("[TestRig] meadow fruit type unavailable")
+    if concreteLayerId ~= nil then
+        for px = borderMinX, borderMaxX, AREA_FILL_STEP do
+            self:paintTerrainAtLayer(px, borderMinZ, concreteLayerId)
+            self:paintTerrainAtLayer(px, borderMaxZ, concreteLayerId)
+        end
+        for pz = borderMinZ, borderMaxZ, AREA_FILL_STEP do
+            self:paintTerrainAtLayer(borderMinX, pz, concreteLayerId)
+            self:paintTerrainAtLayer(borderMaxX, pz, concreteLayerId)
+        end
+        debugPrintf("[TestRig] border painted: X[%.2f, %.2f] Z[%.2f, %.2f]", borderMinX, borderMaxX, borderMinZ, borderMaxZ)
     else
-        local rowZ = hz + TEST_RIG_SPACING * 1.5
-
-        for state = 1, TEST_RIG_MEADOW_STATES do
-            local px = hx + (state - 1) * TEST_RIG_SPACING
-            self:sowFruit(px, rowZ, meadowIndex, state)
-            debugPrintf("[TestRig] meadow L%d at (%.2f %.2f)", state, px, rowZ)
-        end
-    end
-
-    -- applyDecoFoliage has no growth-level parameter at all (unlike
-    -- sowing's explicit growthState) - this is an experiment, not a known
-    -- mechanic: does repeat-stamping the same spot accumulate density the
-    -- way this engine's real paint tools often work? Column N gets N
-    -- applyDecoFoliage calls on the exact same spot. Using grassShort
-    -- since it's the one name proven reliable all session.
-    debugPrint("[TestRig] --- grassShort repeat-stamp row (experiment) ---")
-    local repeatRowZ = hz + TEST_RIG_SPACING * 3
-
-    for repeatCount = 1, TEST_RIG_DECO_REPEAT_LEVELS do
-        local px = hx + (repeatCount - 1) * TEST_RIG_SPACING
-
-        for _ = 1, repeatCount do
-            self:placeFoliage(px, repeatRowZ, GRASS_LOW_WRITE)
-        end
-
-        debugPrintf("[TestRig] grassShort x%d at (%.2f %.2f)", repeatCount, px, repeatRowZ)
+        debugPrint("[TestRig] CONCRETEINDUSTRIAL layer not found, skipping border")
     end
 end
 
@@ -1450,21 +1352,6 @@ function ImmersiveWeathering:plantRandomFruit(x, z)
     )
 
     return true
-end
-
-function ImmersiveWeathering:getMeadowFruitTypeIndex()
-    if self.meadowFruitTypeIndex == nil then
-        local meadow = g_fruitTypeManager:getFruitTypeByName("MEADOW")
-
-        if meadow == nil then
-            debugPrint("ERROR: no 'MEADOW' fruit type registered on this map")
-            self.meadowFruitTypeIndex = false
-        else
-            self.meadowFruitTypeIndex = meadow.index
-        end
-    end
-
-    return self.meadowFruitTypeIndex or nil
 end
 
 -- Picks one mutually-exclusive outcome from FOLIAGE_STATE_OPTIONS for
@@ -2029,11 +1916,11 @@ local TYRE_CLEAR_DISTANCE = 0.35
 local TYRE_DISPLACE_CHANCE = 0.15
 
 function ImmersiveWeathering:getTyreWitherChance()
-    return TYRE_WITHER_LEVELS[self.tyreWitherLevelIndex]
+    return TYRE_WITHER_LEVELS[self.config:getTyreWitherLevelIndex()]
 end
 
 function ImmersiveWeathering:getSweepSampleCount()
-    return SWEEP_SAMPLE_COUNTS[self.sweepSampleCountIndex]
+    return SWEEP_SAMPLE_COUNTS[self.config:getSweepSampleCountIndex()]
 end
 
 -- Shared by every terrain-paint target (dirt, gravel, ...) - resolves and
@@ -2091,7 +1978,7 @@ function ImmersiveWeathering:paintTerrainAtLayer(x, z, layerId)
 end
 
 function ImmersiveWeathering:paintWitherMaterial(x, z)
-    local palette = TYRE_PAINT_PALETTES[self.tyrePaintPaletteIndex]
+    local palette = TYRE_PAINT_PALETTES[self.config:getTyrePaintPaletteIndex()]
     local materialName = pickPaintMaterial(palette.entries)
     local layerId = self:getTerrainLayerIdByName(materialName)
     if layerId == nil then
@@ -2524,7 +2411,7 @@ function ImmersiveWeathering:onWheelDestructionUpdate(
         return
     end
 
-    if not self.tyreEffectsEnabled then
+    if not self.config:isTyreEffectsEnabled() then
         return
     end
 

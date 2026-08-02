@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="93">
     <author>ubuntu811</author>
-    <version>1.2.0.0</version>
+    <version>1.3.0.0</version>
     <title>
         <en>Immersive Weathering</en>
     </title>
@@ -23,109 +23,113 @@
     </dependencies>
 
     <extraSourceFiles>
+        <sourceFile filename="scripts/UIHelper.lua" />
+        <sourceFile filename="scripts/IWConfig.lua" />
+        <sourceFile filename="scripts/IWSettingsUI.lua" />
         <sourceFile filename="scripts/ImmersiveWeathering.lua" />
     </extraSourceFiles>
 
     <actions>
-        <!-- IW_PLACE_TEST_RIG and IW_FILL_AREA are retired for now, not
-             just unbound - no action, no binding, no l10n. The underlying
-             functions (placeFoliageTestRig, placeFoliageAreaFill) and their
-             key-press handlers are untouched in the Lua, just no longer
-             wired to an input action. Re-add all three pieces together to
-             bring a debug key back. -->
+        <!-- Restored for the next round of testing - the underlying
+             functions (placeFoliageTestRig, placeFoliageAreaFill) and
+             their key-press handlers were never removed, just unwired. -->
+        <action name="IW_PLACE_TEST_RIG" axisType="HALF"/>
+        <action name="IW_FILL_AREA" axisType="HALF"/>
         <action name="IW_WEATHER_CROSSHAIR" axisType="HALF"/>
         <action name="IW_RUN_SWEEP" axisType="HALF"/>
-        <action name="IW_TOGGLE_SAMPLE_COUNT" axisType="HALF"/>
-        <!-- No category attribute on any action below either: tried
-             category="ONFOOT" and category="VEHICLE" through the global
-             g_inputBinding registration path earlier, and also tried a
-             fully per-vehicle Vehicle:onRegisterActionEvents +
-             self:addActionEvent mechanism (the pattern real vehicle
-             specializations use, confirmed against TerraFarm's own
-             MACHINE_TOGGLE_ACTIVE) - that per-vehicle approach was flaky
-             (isActiveForInput silently flipped false and wiped bindings)
-             and was fully reverted. All six IW_* actions now register once
-             globally via PlayerInputComponent.registerGlobalPlayerActionEvents
-             and stay active identically on foot or in any vehicle; category
-             is omitted everywhere so the engine's own ONFOOT/VEHICLE context
-             switch can't silently deactivate them out from under us. No
-             AI-exclude toggle - AI-driven vehicles are unconditionally
-             excluded from tyre effects in the Lua, player-only by design,
-             not an option. -->
+        <!-- IW_TOGGLE_SAMPLE_COUNT, IW_CYCLE_WITHER_CHANCE,
+             IW_TOGGLE_PAINT_BIAS, IW_SWAP_DIRT_GRAVEL and IW_SOW_GRASS
+             retired the same way as IW_PLACE_TEST_RIG/IW_FILL_AREA above -
+             sample count/wither chance/paint bias now live on the
+             Settings page instead of a cycle key; swap/sow are
+             superseded by automatic mechanics (material drift, the
+             seeder feature) that do the same job without a manual key.
+             No category attribute: engine's own ONFOOT/VEHICLE context
+             switch can't silently deactivate these out from under us -
+             see the earlier note in the Lua about the flaky per-vehicle
+             registration attempt that was fully reverted. No AI-exclude
+             toggle - AI-driven vehicles are unconditionally excluded from
+             tyre effects in the Lua, player-only by design, not an
+             option. -->
         <action name="IW_TOGGLE_TYRE_EFFECTS" axisType="HALF"/>
-        <action name="IW_CYCLE_WITHER_CHANCE" axisType="HALF"/>
-        <action name="IW_TOGGLE_PAINT_BIAS" axisType="HALF"/>
-        <!-- QOL manual override - swaps dirt<->gravel at the crosshair,
-             since the paint bias dial is a weighted roll, not a
-             guarantee, and there was previously no way to just fix a
-             patch that landed on the wrong one. -->
-        <action name="IW_SWAP_DIRT_GRAVEL" axisType="HALF"/>
-        <!-- The nuclear reset - unconditionally repaints grass + sows
-             short grass over an area at the crosshair, no matter what's
-             currently there (dirt, gravel, even a flat concrete/asphalt
-             square from a different mod's paint tool). Also the answer
-             for "tyre ruts scarred my meadow" - manually reseed it, same
-             as swap and clear are manual answers for their own gripes. -->
-        <action name="IW_SOW_GRASS" axisType="HALF"/>
     </actions>
 
     <inputBinding>
+        <actionBinding action="IW_PLACE_TEST_RIG">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_r" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_FILL_AREA">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_f" index="1" />
+        </actionBinding>
         <actionBinding action="IW_WEATHER_CROSSHAIR">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_h" index="1" />
         </actionBinding>
         <actionBinding action="IW_RUN_SWEEP">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
         </actionBinding>
-        <actionBinding action="IW_TOGGLE_SAMPLE_COUNT">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_i" index="1" />
-        </actionBinding>
         <actionBinding action="IW_TOGGLE_TYRE_EFFECTS">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_t" index="1" />
-        </actionBinding>
-        <!-- Single-Shift+letter combos kept colliding with per-vehicle
-             defaults all night (T flaky, Y dead, P clashed with a menu,
-             now O/U clash with crab/all-wheel steering on this tractor).
-             Confirmed via FS25_followme's own FOLLOW_CHASER_CHOOSE that a
-             3-token chord (two modifiers + one key) is valid syntax, and
-             far less likely to already be claimed by any vehicle. -->
-        <actionBinding action="IW_CYCLE_WITHER_CHANCE">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_b" index="1" />
-        </actionBinding>
-        <actionBinding action="IW_TOGGLE_PAINT_BIAS">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_v" index="1" />
-        </actionBinding>
-        <actionBinding action="IW_SWAP_DIRT_GRAVEL">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_g" index="1" />
-        </actionBinding>
-        <actionBinding action="IW_SOW_GRASS">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_s" index="1" />
         </actionBinding>
     </inputBinding>
 
     <l10n>
+         <text name="input_IW_PLACE_TEST_RIG">
+            <en>Place foliage test rig</en>
+        </text>
+         <text name="input_IW_FILL_AREA">
+            <en>Fill area (debug)</en>
+        </text>
          <text name="input_IW_WEATHER_CROSSHAIR">
             <en>Weather Target</en>
         </text>
          <text name="input_IW_RUN_SWEEP">
             <en>Weathering Sweep</en>
         </text>
-         <text name="input_IW_TOGGLE_SAMPLE_COUNT">
-            <en>Sweep sample count</en>
-        </text>
          <text name="input_IW_TOGGLE_TYRE_EFFECTS">
             <en>Tyre withering</en>
         </text>
-         <text name="input_IW_CYCLE_WITHER_CHANCE">
-            <en>Tyre withering weight</en>
+
+        <!-- UIHelper.createControlsDynamically requires a _title/_info
+             pair per control (id = prefix .. name), plus one _title for
+             the section header itself. -->
+        <text name="iw_setting_title">
+            <en>Immersive Weathering</en>
         </text>
-         <text name="input_IW_TOGGLE_PAINT_BIAS">
-            <en>Tyre withering material</en>
+        <text name="iw_tyreWitherLevelIndex_title">
+            <en>Tyre withering chance</en>
         </text>
-         <text name="input_IW_SWAP_DIRT_GRAVEL">
-            <en>Swap dirt/gravel at crosshair</en>
+        <text name="iw_tyreWitherLevelIndex_info">
+            <en>How often grass converts to dirt/gravel under tyre contact.</en>
         </text>
-         <text name="input_IW_SOW_GRASS">
-            <en>Sow grass at crosshair</en>
+        <text name="iw_tyrePaintPaletteIndex_title">
+            <en>Tyre withering material bias</en>
         </text>
+        <text name="iw_tyrePaintPaletteIndex_info">
+            <en>Which material fresh conversions lean toward.</en>
+        </text>
+        <text name="iw_sweepSampleCountIndex_title">
+            <en>Nightly sweep sample count</en>
+        </text>
+        <text name="iw_sweepSampleCountIndex_info">
+            <en>How many points the nightly weathering sweep samples. Higher covers more ground per sweep but costs more per run.</en>
+        </text>
+
+        <!-- Choice-control value labels - one per entry in
+             TYRE_WITHER_LEVEL_LABELS/TYRE_PAINT_PALETTE_LABELS/
+             SWEEP_SAMPLE_COUNT_LABELS, same order. -->
+        <text name="iw_wither_pct_0"><en>0%</en></text>
+        <text name="iw_wither_pct_20"><en>20%</en></text>
+        <text name="iw_wither_pct_40"><en>40%</en></text>
+        <text name="iw_wither_pct_60"><en>60%</en></text>
+        <text name="iw_wither_pct_80"><en>80%</en></text>
+        <text name="iw_wither_pct_100"><en>100%</en></text>
+        <text name="iw_material_dirt"><en>Dirt-leaning</en></text>
+        <text name="iw_material_gravel"><en>Gravel-leaning</en></text>
+        <text name="iw_samples_1000"><en>1000</en></text>
+        <text name="iw_samples_2000"><en>2000</en></text>
+        <text name="iw_samples_4000"><en>4000</en></text>
+        <text name="iw_samples_6000"><en>6000</en></text>
+        <text name="iw_samples_8000"><en>8000</en></text>
+        <text name="iw_samples_10000"><en>10000</en></text>
      </l10n>
 </modDesc>
