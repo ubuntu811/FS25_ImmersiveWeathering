@@ -169,7 +169,6 @@ local AREA_FILL_STEP = 0.5
 -- getFoliageNameAt can never find it back by that name).
 local GRASS_LOW_WRITE = "grassShort"
 local GRASS_LOW_READ = "decoFoliage"
-local EMPTY = "<empty>"
 -- "decoBush" (Layer 1, type 3) is confirmed in decoFoliages - real,
 -- writable in principle, used for the pre-existing map bush displace
 -- target - but flaky this session (rejected every attempt on this
@@ -560,18 +559,6 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
             end
 
             registerDebugAction(
-                InputAction.IW_PLACE_TEST_RIG,
-                ImmersiveWeathering.onPlaceTestRigPressed,
-                "place test rig"
-            )
-
-            registerDebugAction(
-                InputAction.IW_FILL_AREA,
-                ImmersiveWeathering.onFillAreaPressed,
-                "fill area"
-            )
-
-            registerDebugAction(
                 InputAction.IW_WEATHER_CROSSHAIR,
                 ImmersiveWeathering.onWeatherCrosshairPressed,
                 "weather crosshair"
@@ -581,6 +568,12 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
                 InputAction.IW_RUN_SWEEP,
                 ImmersiveWeathering.onRunSweepPressed,
                 "run sweep"
+            )
+
+            registerDebugAction(
+                InputAction.IW_DEBUG_MENU,
+                ImmersiveWeathering.onDebugMenuPressed,
+                "debug menu"
             )
 
             -- IW_TOGGLE_SAMPLE_COUNT, IW_CYCLE_WITHER_CHANCE and
@@ -621,17 +614,6 @@ PlayerInputComponent.registerGlobalPlayerActionEvents =
 -- bindings. Back to the same global on-foot hook H/N/I already use
 -- reliably everywhere, on foot and in any vehicle, confirmed all night.
 
-function ImmersiveWeathering:onPlaceTestRigPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    debugPrint("Immersive Weathering (FS25): place test rig key pressed")
-
-    self:placeFoliageTestRig()
-end
-
 function ImmersiveWeathering:onWeatherCrosshairPressed(
     actionName,
     inputValue,
@@ -642,14 +624,140 @@ function ImmersiveWeathering:onWeatherCrosshairPressed(
     self:weatherAtCrosshair()
 end
 
-function ImmersiveWeathering:onFillAreaPressed(
-    actionName,
-    inputValue,
-    callbackState,
-    isAnalog
-)
-    debugPrint("Immersive Weathering (FS25): fill area key pressed")
-    self:placeFoliageAreaFill()
+-- Throwaway investigation tool - the real question this answers: does
+-- painting a specific numbered visual layer (e.g. "grass01") alone make
+-- getTerrainAttributesAtWorldPos's coarse materialId read back as GRASS,
+-- or is that driven by something else entirely (the separate uppercase
+-- GRASS/GRASSDRY/GRASSPAVEMENT layers this map ALSO declares - see the
+-- [50]/[51]/[52] entries from the "Dump terrain layers" debug menu
+-- action). Paints one cell per
+-- layer in PAINT_LAYER_TEST_ROW, spaced out along +X from the crosshair -
+-- walk the row afterward and check WAILA's "Ground:" line at each spot.
+local PAINT_LAYER_TEST_ROW = {
+    "grass01", "grass02", "grassDry01", "grassDry02", "grassPavement01",
+    "GRASS", "GRASSDRY", "GRASSPAVEMENT",
+}
+
+function ImmersiveWeathering:placeTerrainLayerTestRow()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+
+    raycastClosest(
+        x, y, z,
+        dirX, dirY, dirZ,
+        200,
+        "onDebugFieldRaycastCallback",
+        self,
+        CollisionFlag.TERRAIN
+    )
+
+    if self.debugFieldRaycastHit == nil then
+        debugPrint("[LayerTest] No terrain hit within raycast range")
+        return
+    end
+
+    local hx, _, hz = unpack(self.debugFieldRaycastHit)
+
+    for i, layerName in ipairs(PAINT_LAYER_TEST_ROW) do
+        local px = hx + (i - 1) * TEST_RIG_SPACING
+        local layerId = self:getTerrainLayerIdByName(layerName)
+
+        if layerId == nil then
+            debugPrintf("[LayerTest] [%d] %s -> no such layer on this map", i, layerName)
+        else
+            self:paintTerrainAtLayer(px, hz, layerId)
+            debugPrintf("[LayerTest] [%d] %s (id=%d) painted at (%.2f %.2f)", i, layerName, layerId, px, hz)
+        end
+    end
+end
+
+-- Throwaway investigation tool - checking whether a more granular
+-- ground-type read actually exists (getDensityTypeIndexAtWorldPos/
+-- getDensityStatesAtWorldPos against some dataPlaneId other than
+-- foliage's own), rather than assuming getTerrainAttributesAtWorldPos's
+-- coarse materialId is really the only read available. Every risky call
+-- wrapped in pcall - none of these are confirmed to accept the IDs being
+-- guessed here, only their existence as native functions is confirmed.
+local DENSITY_PROBE_CANDIDATE_NAMES = {
+    "groundType", "GROUND_TYPE", "material", "terrainType", "ground",
+}
+
+function ImmersiveWeathering:dumpDensityProbe()
+    local camera = g_cameraManager:getActiveCamera()
+    local x, y, z = getWorldTranslation(camera)
+    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
+
+    self.debugFieldRaycastHit = nil
+
+    raycastClosest(
+        x, y, z,
+        dirX, dirY, dirZ,
+        200,
+        "onDebugFieldRaycastCallback",
+        self,
+        CollisionFlag.TERRAIN
+    )
+
+    if self.debugFieldRaycastHit == nil then
+        debugPrint("[DensityProbe] No terrain hit within raycast range")
+        return
+    end
+
+    local hx, hy, hz = unpack(self.debugFieldRaycastHit)
+
+    local okAttr, r, g, b, depth, materialId = pcall(
+        getTerrainAttributesAtWorldPos, g_terrainNode, hx, hy, hz, false, false, false, false, true
+    )
+    debugPrintf(
+        "[DensityProbe] baseline getTerrainAttributesAtWorldPos: ok=%s materialId=%s",
+        tostring(okAttr), tostring(okAttr and materialId or r)
+    )
+
+    debugPrintf(
+        "[DensityProbe] g_currentMission.terrainDetailId = %s",
+        tostring(g_currentMission.terrainDetailId)
+    )
+
+    if g_currentMission.terrainDetailId ~= nil then
+        local okType, typeIndex = pcall(getDensityTypeIndexAtWorldPos, g_currentMission.terrainDetailId, hx, hy, hz)
+        local okStates, states = pcall(getDensityStatesAtWorldPos, g_currentMission.terrainDetailId, hx, hy, hz)
+        debugPrintf(
+            "[DensityProbe] via terrainDetailId: typeIndex ok=%s val=%s | states ok=%s val=%s",
+            tostring(okType), tostring(typeIndex), tostring(okStates), tostring(states)
+        )
+    end
+
+    for _, name in ipairs(DENSITY_PROBE_CANDIDATE_NAMES) do
+        local okId, detailId = pcall(getTerrainDetailByName, g_terrainNode, name)
+        if okId and detailId ~= nil then
+            local okType, typeIndex = pcall(getDensityTypeIndexAtWorldPos, detailId, hx, hy, hz)
+            debugPrintf(
+                "[DensityProbe] getTerrainDetailByName('%s') -> id=%s | typeIndex ok=%s val=%s",
+                name, tostring(detailId), tostring(okType), tostring(typeIndex)
+            )
+        else
+            debugPrintf("[DensityProbe] getTerrainDetailByName('%s') -> no result", name)
+        end
+    end
+end
+
+-- Throwaway investigation tool, not meant to stay - checking whether
+-- ground-type groupings that share one groundTypeMappings title are
+-- actually distinct paintable layers on this map. getTerrainNumOfLayers/
+-- getTerrainLayerName (both real, already used by getTerrainLayerIdByName
+-- below) are the only way to see this map's actual declared layer list -
+-- map.xml's groundTypeMappings can list names that were never real
+-- entries, so this is the ground truth check.
+function ImmersiveWeathering:dumpTerrainLayers()
+    local numLayers = getTerrainNumOfLayers(g_terrainNode)
+    debugPrintf("[TerrainLayers] %d layers declared on this map:", numLayers)
+    for i = 0, numLayers - 1 do
+        local layerName = getTerrainLayerName(g_terrainNode, i)
+        debugPrintf("[TerrainLayers] [%d] %s", i, tostring(layerName))
+    end
 end
 
 -- The power-tools overlay has no room to show current values, only static
@@ -693,6 +801,70 @@ function ImmersiveWeathering:onRunSweepPressed(
 )
     debugPrint("Immersive Weathering (FS25): run sweep key pressed")
     self:runWeatheringSweep()
+end
+
+function ImmersiveWeathering:onDebugMenuPressed(
+    actionName,
+    inputValue,
+    callbackState,
+    isAnalog
+)
+    debugPrint("Immersive Weathering (FS25): debug menu key pressed")
+    self:showDebugMenu()
+end
+
+-- IW's own minimal port of the OptionDialog pattern seen working in
+-- FS25_PowerTools's DialogHelper.showOptionDialog - OptionDialog/
+-- OptionDialog.createFromExistingGui are real base-game GUI classes
+-- (dataS/gui/dialogs/, same family as YesNoDialog/TextInputDialog), not a
+-- PowerTools-exclusive trick or a dependency on that mod. Replaces what
+-- used to be five separate debug/test keybinds (place test rig, fill
+-- area, dump terrain layers, paint layer test row, density probe) with
+-- one menu - the keybind list was growing by one every time a new
+-- throwaway investigation tool showed up. Core gameplay actions (weather
+-- crosshair, run sweep, toggle tyre effects) deliberately stay on direct
+-- keys, not folded into this menu - those get pressed constantly during
+-- normal testing, a menu round-trip would be the wrong tradeoff for them.
+function ImmersiveWeathering:showDebugMenu()
+    local actions = {
+        { "Place foliage test rig", self.placeFoliageTestRig },
+        { "Fill area (debug)", self.placeFoliageAreaFill },
+        { "Dump terrain layers", self.dumpTerrainLayers },
+        { "Paint layer test row", self.placeTerrainLayerTestRow },
+        { "Dump density probe", self.dumpDensityProbe },
+    }
+
+    local options = {}
+    for index, action in ipairs(actions) do
+        options[#options + 1] = index .. ") " .. action[1]
+    end
+
+    local target = self
+    local function onDebugMenuSelected(callbackTarget, selectedOption, args)
+        debugPrintf("[DebugMenu] callback fired, selectedOption=%s", tostring(selectedOption))
+
+        if type(selectedOption) ~= "number" or selectedOption == 0 then
+            return
+        end
+
+        local action = actions[selectedOption]
+
+        if action ~= nil and action[2] ~= nil then
+            debugPrintf("[DebugMenu] running action %d: %s", selectedOption, action[1])
+            action[2](target)
+        end
+    end
+
+    OptionDialog.createFromExistingGui({
+        options = options,
+        optionText = "Choose a debug action",
+        optionTitle = "IW Debug Tools",
+        callbackFunc = onDebugMenuSelected,
+    }, "IWDebugMenuOptionDialog")
+
+    local optionDialog = OptionDialog.INSTANCE
+    optionDialog.optionElement:setState(1)
+    optionDialog:setCallback(onDebugMenuSelected, target, {})
 end
 
 function ImmersiveWeathering:onDayChanged()
@@ -834,10 +1006,23 @@ function ImmersiveWeathering:placeGrassAtCrosshair()
     self:placeFoliage(hx, hz)
 end
 
--- Runs the exact same per-sample logic the daily sweep uses, but on one
--- targeted spot instead of 1000 random ones - point at a specific patch
--- and see what it is, what got rolled, and what it became, instead of
--- waiting on blind resampling luck to ever land there again.
+-- Runs the exact same per-sample logic the daily sweep uses, but on a
+-- small deterministic grid around one targeted spot instead of 1000
+-- random ones across the whole map - point at a specific patch and see
+-- what it is, what got rolled, and what it became, instead of waiting on
+-- blind resampling luck to ever land there again. Matches WAILA's own
+-- "AREA 5x5m / step 0.50m" HUD stat block exactly, so before/after is
+-- directly comparable, and processing the whole visible patch instead of
+-- one exact coordinate sidesteps whether this raycast and WAILA's own
+-- independent raycast landed on the same sub-tile point.
+local WEATHER_CROSSHAIR_AREA_SIZE = 5
+local WEATHER_CROSSHAIR_AREA_STEP = 0.5
+-- Debug toggle: false makes weatherAtCrosshair only evolve foliage that's
+-- already there, never seed new growth on empty ground - isolates "does
+-- an established patch actually change" from "does new nearby growth just
+-- look like it did". Flip back to true for normal use once that's settled.
+local WEATHER_CROSSHAIR_ALLOW_FRESH_PLACEMENT = false
+
 function ImmersiveWeathering:weatherAtCrosshair()
     local camera = g_cameraManager:getActiveCamera()
     local x, y, z = getWorldTranslation(camera)
@@ -860,17 +1045,29 @@ function ImmersiveWeathering:weatherAtCrosshair()
     end
 
     local hx, _, hz = unpack(self.debugFieldRaycastHit)
-    local before = self:getFoliageNameAt(hx, hz) or EMPTY
+    local half = WEATHER_CROSSHAIR_AREA_SIZE * 0.5
     local stats = {}
+    local sampled = 0
 
-    self:applyFoliageTransitions(hx, hz, stats, true)
-    self:applyTerrainRegrowth(hx, hz, stats, true)
-
-    local after = self:getFoliageNameAt(hx, hz) or EMPTY
+    -- Direct world x/z density-map reads/writes per grid point, no
+    -- per-point raycast - same cheap pattern placeFoliageAreaFill and the
+    -- nightly sweep already use, just a dense deterministic grid instead
+    -- of a random scatter.
+    local dz = -half
+    while dz <= half do
+        local dx = -half
+        while dx <= half do
+            self:applyFoliageTransitions(hx + dx, hz + dz, stats, true, WEATHER_CROSSHAIR_ALLOW_FRESH_PLACEMENT)
+            self:applyTerrainRegrowth(hx + dx, hz + dz, stats, true)
+            sampled = sampled + 1
+            dx = dx + WEATHER_CROSSHAIR_AREA_STEP
+        end
+        dz = dz + WEATHER_CROSSHAIR_AREA_STEP
+    end
 
     debugPrintf(
-        "[Weather] (%.2f %.2f) before=%s after=%s seeded=%d spread=%d grown=%d mutated=%d regrown=%d",
-        hx, hz, before, after,
+        "[Weather] (%.2f %.2f) %gx%gm sampled=%d seeded=%d spread=%d grown=%d mutated=%d regrown=%d",
+        hx, hz, WEATHER_CROSSHAIR_AREA_SIZE, WEATHER_CROSSHAIR_AREA_SIZE, sampled,
         stats.seeded or 0, stats.spread or 0, stats.grown or 0, stats.mutated or 0, stats.regrown or 0
     )
 end
@@ -1335,18 +1532,34 @@ end
 -- genuinely empty neighbors for every entry uniformly. Flagging as a
 -- deliberate simplification, not an oversight.
 local FOLIAGE_FRESH_PLACEMENT_CHANCE = 0.05
+-- Was bumped 0.10 -> 0.90 for testing (spread wasn't observed working at
+-- 0.10 across the nightly sweep's own dilution) and confirmed working -
+-- almost too well. weatherAtCrosshair's grid reads/writes the same live
+-- density map as it scans, not a snapshot, so an existing clusters=true
+-- cell near the start of the raster can spread onto a not-yet-visited
+-- neighbor, which the scan then reaches moments later in the SAME press
+-- and spreads again, chaining across the whole grid in one press - at 90%
+-- per cell per visit that chain reaction was close to guaranteed. Back to
+-- its original 0.10 now that spread is unambiguously confirmed working -
+-- makes a multi-step chain within one pass exponentially, not just
+-- somewhat, less likely (0.1^n per n-step chain instead of 0.9^n).
 local FOLIAGE_SPREAD_CHANCE = 0.10
 
-function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force)
+function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force, allowFreshPlacement)
     local name, stage = self:getFoliageNameAt(x, z)
-    local entry = self.foliagePalette:findEntry(name)
+    local entry = self.foliagePalette:findEntry(name, stage)
 
     if entry == nil then
         -- Nothing here the palette recognizes - either truly empty, or
         -- real content outside the configured palette (ambient map
         -- decoration). Either way, only a fresh-placement roll applies,
         -- same as EMPTY->seed used to be the only thing that fired here.
-        if name == nil and (force or math.random() <= FOLIAGE_FRESH_PLACEMENT_CHANCE) then
+        -- allowFreshPlacement defaults true (unchanged real behavior) -
+        -- explicitly false lets a caller isolate "only evolve what's
+        -- already there" from "also seed new growth on empty ground", for
+        -- telling apart an established patch actually mutating from new
+        -- growth nearby just looking like it did.
+        if allowFreshPlacement ~= false and name == nil and (force or math.random() <= FOLIAGE_FRESH_PLACEMENT_CHANCE) then
             local freshEntry = self.foliagePalette:pickFreshEntry()
             local freshStage = self.foliagePalette:pickInitialStage(freshEntry)
             local writeName = self.foliagePalette:getWriteName(freshEntry, freshStage)
@@ -1426,7 +1639,14 @@ function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force)
                 and self:fieldIsMaterial(nx, nz, WEATHERABLE_MATERIALS)
                 and self:isSpotClearForFoliage(nx, nz)
             then
-                local spreadStage = self.foliagePalette:pickInitialStage(entry)
+                -- Ordered entries (meadow) spread as a fresh young
+                -- instance, starting at stageMin and growing up on its own
+                -- subsequent visits. randomStage entries (unrelated
+                -- species/model variants) instead clone the SOURCE's own
+                -- current species - spreading shouldn't turn a poppy patch
+                -- into a random different flower at the edges, any more
+                -- than growth should.
+                local spreadStage = self.foliagePalette:pickSpreadStage(entry, stage)
                 local spreadWriteName = self.foliagePalette:getWriteName(entry, spreadStage)
 
                 if self:placeFoliage(nx, nz, spreadWriteName) then

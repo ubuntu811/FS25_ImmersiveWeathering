@@ -31,20 +31,27 @@
     </extraSourceFiles>
 
     <actions>
-        <!-- Restored for the next round of testing - the underlying
-             functions (placeFoliageTestRig, placeFoliageAreaFill) and
-             their key-press handlers were never removed, just unwired. -->
-        <action name="IW_PLACE_TEST_RIG" axisType="HALF"/>
-        <action name="IW_FILL_AREA" axisType="HALF"/>
         <action name="IW_WEATHER_CROSSHAIR" axisType="HALF"/>
         <action name="IW_RUN_SWEEP" axisType="HALF"/>
+        <!-- Every previously-separate debug/test keybind (place test rig,
+             fill area, dump terrain layers, paint layer test row, density
+             probe) is consolidated into one OptionDialog-based menu now -
+             see ImmersiveWeathering:showDebugMenu. Their underlying
+             functions are unchanged, only the direct keybinds are gone -
+             the keybind list was growing one throwaway investigation tool
+             at a time and had become unmanageable. Weather crosshair/run
+             sweep/toggle tyre effects stay on direct keys - those are core
+             gameplay actions used constantly during testing, not one-off
+             debug tools, so a menu round-trip would be the wrong tradeoff
+             for them specifically. -->
+        <action name="IW_DEBUG_MENU" axisType="HALF"/>
         <!-- IW_TOGGLE_SAMPLE_COUNT, IW_CYCLE_WITHER_CHANCE,
              IW_TOGGLE_PAINT_BIAS, IW_SWAP_DIRT_GRAVEL and IW_SOW_GRASS
-             retired the same way as IW_PLACE_TEST_RIG/IW_FILL_AREA above -
-             sample count/wither chance/paint bias now live on the
-             Settings page instead of a cycle key; swap/sow are
-             superseded by automatic mechanics (material drift, the
-             seeder feature) that do the same job without a manual key.
+             retired the same way - sample count/wither chance/paint bias
+             now live on the Settings page instead of a cycle key;
+             swap/sow are superseded by automatic mechanics (material
+             drift, the seeder feature) that do the same job without a
+             manual key.
              No category attribute: engine's own ONFOOT/VEHICLE context
              switch can't silently deactivate these out from under us -
              see the earlier note in the Lua about the flaky per-vehicle
@@ -56,24 +63,14 @@
     </actions>
 
     <inputBinding>
-        <!-- R itself is a hot letter in the base game's own vehicle scheme -
-             Shift+R ("Start Loading") AND Ctrl+Shift+R ("Collection Mode")
-             are BOTH already real pallet/bale-truck bindings, confirmed the
-             hard way twice in a row. Switched letter entirely rather than
-             stacking more modifiers onto R - K, avoiding the R/O/U/P
-             cluster already known bad from earlier tonight's keybind
-             collisions. -->
-        <actionBinding action="IW_PLACE_TEST_RIG">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_lctrl KEY_k" index="1" />
-        </actionBinding>
-        <actionBinding action="IW_FILL_AREA">
-            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_f" index="1" />
-        </actionBinding>
         <actionBinding action="IW_WEATHER_CROSSHAIR">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_h" index="1" />
         </actionBinding>
         <actionBinding action="IW_RUN_SWEEP">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_DEBUG_MENU">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_lctrl KEY_m" index="1" />
         </actionBinding>
         <actionBinding action="IW_TOGGLE_TYRE_EFFECTS">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_t" index="1" />
@@ -81,17 +78,14 @@
     </inputBinding>
 
     <l10n>
-         <text name="input_IW_PLACE_TEST_RIG">
-            <en>Place foliage test rig</en>
-        </text>
-         <text name="input_IW_FILL_AREA">
-            <en>Fill area (debug)</en>
-        </text>
          <text name="input_IW_WEATHER_CROSSHAIR">
             <en>Weather Target</en>
         </text>
          <text name="input_IW_RUN_SWEEP">
             <en>Weathering Sweep</en>
+        </text>
+         <text name="input_IW_DEBUG_MENU">
+            <en>Debug tools menu</en>
         </text>
          <text name="input_IW_TOGGLE_TYRE_EFFECTS">
             <en>Tyre withering</en>
