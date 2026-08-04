@@ -79,6 +79,15 @@ mod. WAILA is optional but recommended - without it, IW's HUD panel
 loses its anchor point and falls back to a fixed screen position, and
 there's no companion world inspector to pair with the effects.
 
+## Map authors: custom foliage/ground palette
+
+IW works with zero setup on any map (a hardcoded fallback). For a map
+author who wants real, varied foliage and ground-texture behavior instead
+of the default, see
+[docs/MapIntegrationGuide.md](docs/MapIntegrationGuide.md) - practical,
+in-order steps for adapting `map.xml` and writing an `iw.xml`, plus the
+real bugs/gotchas hit building this feature.
+
 ## Engine API notes
 
 Shared with WAILA - see
