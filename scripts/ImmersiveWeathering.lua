@@ -1984,6 +1984,21 @@ function ImmersiveWeathering:paintWitherMaterial(x, z)
 
     local materialName
     if groundEntry ~= nil then
+        -- Mutation check first, same as foliage's own mutatesTo switching
+        -- identity entirely rather than just picking a different texture
+        -- within the same entry - a successful mutation (e.g. dirt->mud
+        -- while raining) means the REST of this function operates on the
+        -- target entry's own textures, not the original's.
+        local mutatedName = self.foliagePalette:rollGroundMutation(groundEntry)
+
+        if mutatedName ~= nil then
+            local mutatedEntry = self.foliagePalette:findGroundEntry(mutatedName)
+
+            if mutatedEntry ~= nil then
+                groundEntry = mutatedEntry
+            end
+        end
+
         materialName = self.foliagePalette:pickGroundTexture(groundEntry)
     else
         local palette = TYRE_PAINT_PALETTES[index]

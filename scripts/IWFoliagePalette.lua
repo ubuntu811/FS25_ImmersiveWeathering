@@ -216,6 +216,7 @@ function IWFoliagePalette:load()
                 name = name,
                 textures = {},
                 foliages = {},
+                mutatesTo = {},
             }
 
             local textureIndex = 0
@@ -256,6 +257,27 @@ function IWFoliagePalette:load()
                 end
 
                 foliageIndex = foliageIndex + 1
+            end
+
+            local groundMutateIndex = 0
+            while true do
+                local mutateKey = string.format("%s.mutatesTo(%d)", key, groundMutateIndex)
+
+                if not xmlFile:hasProperty(mutateKey) then
+                    break
+                end
+
+                local mutateName = xmlFile:getString(mutateKey .. "#name")
+
+                if mutateName ~= nil then
+                    table.insert(groundEntry.mutatesTo, {
+                        name = mutateName,
+                        chance = xmlFile:getInt(mutateKey .. "#chance", 0),
+                        condition = xmlFile:getString(mutateKey .. "#condition"),
+                    })
+                end
+
+                groundMutateIndex = groundMutateIndex + 1
             end
 
             groundEntriesByName[name] = groundEntry
@@ -488,6 +510,57 @@ function IWFoliagePalette:rollGroundFoliage(groundEntry)
     for _, foliage in ipairs(groundEntry.foliages) do
         if foliage.chance > 0 and math.random() * 100 <= foliage.chance then
             return foliage.name
+        end
+    end
+
+    return nil
+end
+
+-- Confirmed real via base game source (dataS/scripts/vehicles/
+-- specializations/Washable.lua), not scriptBinding.xml - see
+-- docs/engine-api/Weather.md. The base game itself has no simple
+-- isRaining() flag, it's this exact three-part formula. Unrecognized
+-- condition names fail closed (return false) rather than silently
+-- passing - a typo'd condition in iw.xml should mean "never fires", not
+-- "always fires".
+local function isConditionTrue(conditionName)
+    if conditionName == "isRaining" then
+        if g_currentMission == nil
+                or g_currentMission.environment == nil
+                or g_currentMission.environment.weather == nil then
+            return false
+        end
+
+        local weather = g_currentMission.environment.weather
+        local ok, rainScale, timeSinceLastRain, temperature = pcall(function()
+            return weather:getRainFallScale(), weather:getTimeSinceLastRain(), weather:getCurrentTemperature()
+        end)
+
+        if not ok then
+            return false
+        end
+
+        return rainScale > 0.1 and timeSinceLastRain < 30 and temperature > 0
+    end
+
+    return false
+end
+
+-- Public: independent roll per <mutatesTo> child - first one whose
+-- condition (if any) passes AND chance roll succeeds wins, switching the
+-- WHOLE ground entry (caller should look the returned name up via
+-- findGroundEntry and use that instead), same "identity switch" shape as
+-- foliageMapping's own mutatesTo. Returns nil if nothing qualified.
+function IWFoliagePalette:rollGroundMutation(groundEntry)
+    if groundEntry == nil then
+        return nil
+    end
+
+    for _, mutation in ipairs(groundEntry.mutatesTo) do
+        if mutation.chance > 0
+                and (mutation.condition == nil or isConditionTrue(mutation.condition))
+                and math.random() * 100 <= mutation.chance then
+            return mutation.name
         end
     end
 
