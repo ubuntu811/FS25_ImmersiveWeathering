@@ -129,30 +129,9 @@ local WEATHERING_COLLISION_FLAG_NAMES = {
     "STATIC_OBJECT", "DYNAMIC_OBJECT", "BUILDING", "ROAD", "ANIMAL"
 }
 
--- Grid map.xml test: every deco layer name x explicit <mapping> states
--- 0-15 (15 = the real max for numChannels=4, 2^4-1). Originally 1-9 for
--- all 9 layers plus a separate decoFoliage-only 0-15 sweep - widened
--- uniformly after finding real content on decoFoliage's states 10-15 that
--- a 1-9-only sweep would have missed on every other layer too.
-local TEST_RIG_GRID_LAYERS = {
-    "decoFoliage", "decoFoliageEU", "forestPlants", "waterPlants",
-    "decoBush", "decoBushUS", "groundFoliage", "forestGrass", "forestBush",
-    -- meadow was previously untestable this way (only a <paintableFoliage>
-    -- declaration, no <decoFoliage> one - confirmed via meadowL1-4 all
-    -- returning false). Now has both, testing whether that was the actual
-    -- blocker.
-    "meadow",
-}
--- Declared numChannels=1 on the map (forestGrass/forestBush) - only states
--- 0-1 are within their own declared range. Every other tested layer
--- declares numChannels=4 (states 0-15 all in range), so they're absent
--- here and TEST_RIG_GRID_MAX_STATE falls back to 15 for them.
-local TEST_RIG_GRID_MAX_STATE = {
-    forestGrass = 1,
-    forestBush = 1,
-}
-local TEST_RIG_GRID_STATES = 15
-local TEST_RIG_SPACING = 2.0
+-- TEST_RIG_GRID_LAYERS/MAX_STATE/STATES/SPACING and placeFoliageTestRig
+-- itself moved to WAILA (WailaDebugTools) - pure world/map investigation,
+-- never read or wrote iw.xml/the foliage palette.
 local AREA_FILL_SIZE = 3.0
 local AREA_FILL_STEP = 0.5
 
@@ -624,141 +603,9 @@ function ImmersiveWeathering:onWeatherCrosshairPressed(
     self:weatherAtCrosshair()
 end
 
--- Throwaway investigation tool - the real question this answers: does
--- painting a specific numbered visual layer (e.g. "grass01") alone make
--- getTerrainAttributesAtWorldPos's coarse materialId read back as GRASS,
--- or is that driven by something else entirely (the separate uppercase
--- GRASS/GRASSDRY/GRASSPAVEMENT layers this map ALSO declares - see the
--- [50]/[51]/[52] entries from the "Dump terrain layers" debug menu
--- action). Paints one cell per
--- layer in PAINT_LAYER_TEST_ROW, spaced out along +X from the crosshair -
--- walk the row afterward and check WAILA's "Ground:" line at each spot.
-local PAINT_LAYER_TEST_ROW = {
-    "grass01", "grass02", "grassDry01", "grassDry02", "grassPavement01",
-    "GRASS", "GRASSDRY", "GRASSPAVEMENT",
-}
-
-function ImmersiveWeathering:placeTerrainLayerTestRow()
-    local camera = g_cameraManager:getActiveCamera()
-    local x, y, z = getWorldTranslation(camera)
-    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
-
-    self.debugFieldRaycastHit = nil
-
-    raycastClosest(
-        x, y, z,
-        dirX, dirY, dirZ,
-        200,
-        "onDebugFieldRaycastCallback",
-        self,
-        CollisionFlag.TERRAIN
-    )
-
-    if self.debugFieldRaycastHit == nil then
-        debugPrint("[LayerTest] No terrain hit within raycast range")
-        return
-    end
-
-    local hx, _, hz = unpack(self.debugFieldRaycastHit)
-
-    for i, layerName in ipairs(PAINT_LAYER_TEST_ROW) do
-        local px = hx + (i - 1) * TEST_RIG_SPACING
-        local layerId = self:getTerrainLayerIdByName(layerName)
-
-        if layerId == nil then
-            debugPrintf("[LayerTest] [%d] %s -> no such layer on this map", i, layerName)
-        else
-            self:paintTerrainAtLayer(px, hz, layerId)
-            debugPrintf("[LayerTest] [%d] %s (id=%d) painted at (%.2f %.2f)", i, layerName, layerId, px, hz)
-        end
-    end
-end
-
--- Throwaway investigation tool - checking whether a more granular
--- ground-type read actually exists (getDensityTypeIndexAtWorldPos/
--- getDensityStatesAtWorldPos against some dataPlaneId other than
--- foliage's own), rather than assuming getTerrainAttributesAtWorldPos's
--- coarse materialId is really the only read available. Every risky call
--- wrapped in pcall - none of these are confirmed to accept the IDs being
--- guessed here, only their existence as native functions is confirmed.
-local DENSITY_PROBE_CANDIDATE_NAMES = {
-    "groundType", "GROUND_TYPE", "material", "terrainType", "ground",
-}
-
-function ImmersiveWeathering:dumpDensityProbe()
-    local camera = g_cameraManager:getActiveCamera()
-    local x, y, z = getWorldTranslation(camera)
-    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
-
-    self.debugFieldRaycastHit = nil
-
-    raycastClosest(
-        x, y, z,
-        dirX, dirY, dirZ,
-        200,
-        "onDebugFieldRaycastCallback",
-        self,
-        CollisionFlag.TERRAIN
-    )
-
-    if self.debugFieldRaycastHit == nil then
-        debugPrint("[DensityProbe] No terrain hit within raycast range")
-        return
-    end
-
-    local hx, hy, hz = unpack(self.debugFieldRaycastHit)
-
-    local okAttr, r, g, b, depth, materialId = pcall(
-        getTerrainAttributesAtWorldPos, g_terrainNode, hx, hy, hz, false, false, false, false, true
-    )
-    debugPrintf(
-        "[DensityProbe] baseline getTerrainAttributesAtWorldPos: ok=%s materialId=%s",
-        tostring(okAttr), tostring(okAttr and materialId or r)
-    )
-
-    debugPrintf(
-        "[DensityProbe] g_currentMission.terrainDetailId = %s",
-        tostring(g_currentMission.terrainDetailId)
-    )
-
-    if g_currentMission.terrainDetailId ~= nil then
-        local okType, typeIndex = pcall(getDensityTypeIndexAtWorldPos, g_currentMission.terrainDetailId, hx, hy, hz)
-        local okStates, states = pcall(getDensityStatesAtWorldPos, g_currentMission.terrainDetailId, hx, hy, hz)
-        debugPrintf(
-            "[DensityProbe] via terrainDetailId: typeIndex ok=%s val=%s | states ok=%s val=%s",
-            tostring(okType), tostring(typeIndex), tostring(okStates), tostring(states)
-        )
-    end
-
-    for _, name in ipairs(DENSITY_PROBE_CANDIDATE_NAMES) do
-        local okId, detailId = pcall(getTerrainDetailByName, g_terrainNode, name)
-        if okId and detailId ~= nil then
-            local okType, typeIndex = pcall(getDensityTypeIndexAtWorldPos, detailId, hx, hy, hz)
-            debugPrintf(
-                "[DensityProbe] getTerrainDetailByName('%s') -> id=%s | typeIndex ok=%s val=%s",
-                name, tostring(detailId), tostring(okType), tostring(typeIndex)
-            )
-        else
-            debugPrintf("[DensityProbe] getTerrainDetailByName('%s') -> no result", name)
-        end
-    end
-end
-
--- Throwaway investigation tool, not meant to stay - checking whether
--- ground-type groupings that share one groundTypeMappings title are
--- actually distinct paintable layers on this map. getTerrainNumOfLayers/
--- getTerrainLayerName (both real, already used by getTerrainLayerIdByName
--- below) are the only way to see this map's actual declared layer list -
--- map.xml's groundTypeMappings can list names that were never real
--- entries, so this is the ground truth check.
-function ImmersiveWeathering:dumpTerrainLayers()
-    local numLayers = getTerrainNumOfLayers(g_terrainNode)
-    debugPrintf("[TerrainLayers] %d layers declared on this map:", numLayers)
-    for i = 0, numLayers - 1 do
-        local layerName = getTerrainLayerName(g_terrainNode, i)
-        debugPrintf("[TerrainLayers] [%d] %s", i, tostring(layerName))
-    end
-end
+-- placeTerrainLayerTestRow, dumpDensityProbe, and dumpTerrainLayers moved
+-- to WAILA (WailaDebugTools) - none of them read or wrote iw.xml/the
+-- foliage palette, pure world/engine investigation.
 
 -- The power-tools overlay has no room to show current values, only static
 -- descriptions of what a key does - so instead of fighting that, these
@@ -826,12 +673,16 @@ end
 -- keys, not folded into this menu - those get pressed constantly during
 -- normal testing, a menu round-trip would be the wrong tradeoff for them.
 function ImmersiveWeathering:showDebugMenu()
+    -- Place foliage test rig / dump terrain layers / paint layer test row
+    -- / density probe all moved to WAILA (WailaDebugTools) - none of them
+    -- ever read or wrote iw.xml/the foliage palette, pure world/engine
+    -- investigation that only lived here because the raycast/paint
+    -- helpers were already at hand. Fill area is the one exception kept
+    -- here for now - unclear yet whether its gravel-not-grassShort
+    -- behavior is a real bug worth tracing before deciding where it
+    -- belongs.
     local actions = {
-        { "Place foliage test rig", self.placeFoliageTestRig },
         { "Fill area (debug)", self.placeFoliageAreaFill },
-        { "Dump terrain layers", self.dumpTerrainLayers },
-        { "Paint layer test row", self.placeTerrainLayerTestRow },
-        { "Dump density probe", self.dumpDensityProbe },
     }
 
     local options = {}
@@ -1117,87 +968,8 @@ function ImmersiveWeathering:placeFoliageAreaFill()
         AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, placed, ((AREA_FILL_SIZE / AREA_FILL_STEP) + 1) ^ 2)
 end
 
--- Deterministic test rig: no dice rolls, no waiting on the sweep to find
--- the right spot. Places the layer x state (0-15) mapping grid at an
--- exact, logged position in front of the camera.
-function ImmersiveWeathering:placeFoliageTestRig()
-    local camera = g_cameraManager:getActiveCamera()
-    local x, y, z = getWorldTranslation(camera)
-    local dirX, dirY, dirZ = localDirectionToWorld(camera, 0, 0, -1)
-
-    self.debugFieldRaycastHit = nil
-
-    raycastClosest(
-        x, y, z,
-        dirX, dirY, dirZ,
-        200,
-        "onDebugFieldRaycastCallback",
-        self,
-        CollisionFlag.TERRAIN
-    )
-
-    if self.debugFieldRaycastHit == nil then
-        debugPrint("[TestRig] No terrain hit within raycast range")
-        return
-    end
-
-    local hx, _, hz = unpack(self.debugFieldRaycastHit)
-
-    -- The species row, meadow growth-state row, and grassShort repeat-stamp
-    -- row that used to run here were one-off exploratory checks - each
-    -- already answered its question tonight, trimmed once they stopped
-    -- earning their log/screen clutter. This grid is the one part worth
-    -- keeping. States 0-15 now for every layer (was 1-9, plus a
-    -- decoFoliage-only 0-15 sweep as a separate row - merged after real
-    -- content turned up on decoFoliage's 10-15 that a 1-9-only sweep would
-    -- have missed on every other layer too).
-    debugPrint("[TestRig] --- mapping grid (layer rows x state 0-15 columns) ---")
-    local concreteLayerId = self:getTerrainLayerIdByName("CONCRETEINDUSTRIAL")
-
-    for row, layerName in ipairs(TEST_RIG_GRID_LAYERS) do
-        local pz = hz + (row - 1) * TEST_RIG_SPACING
-        local maxState = TEST_RIG_GRID_MAX_STATE[layerName] or TEST_RIG_GRID_STATES
-
-        for state = 0, TEST_RIG_GRID_STATES do
-            local px = hx + state * TEST_RIG_SPACING
-            local name = layerName .. "_s" .. state
-            local ok = self:placeFoliage(px, pz, name)
-            debugPrintf("[TestRig] [grid %s x%d] %s at (%.2f %.2f) -> %s", layerName, state, name, px, pz, tostring(ok))
-
-            -- Out-of-this-layer's-own-declared-range marker: paint the
-            -- ground CONCRETE so "nothing here" reads as "expected, this
-            -- state is outside numChannels" at a glance, distinct from an
-            -- in-range state that unexpectedly produced nothing.
-            if state > maxState and concreteLayerId ~= nil then
-                self:paintTerrainAtLayer(px, pz, concreteLayerId)
-            end
-        end
-    end
-
-    -- Visual border around the whole grid's actual bounding box (9 rows x
-    -- 16 cols = 16x30m, +1m margin) - painted in CONCRETE so the real
-    -- placement extent is visible from above at a glance instead of
-    -- guessed from screenshots.
-    local borderMargin = 1.0
-    local borderMinX = hx - borderMargin
-    local borderMaxX = hx + TEST_RIG_GRID_STATES * TEST_RIG_SPACING + borderMargin
-    local borderMinZ = hz - borderMargin
-    local borderMaxZ = hz + (#TEST_RIG_GRID_LAYERS - 1) * TEST_RIG_SPACING + borderMargin
-
-    if concreteLayerId ~= nil then
-        for px = borderMinX, borderMaxX, AREA_FILL_STEP do
-            self:paintTerrainAtLayer(px, borderMinZ, concreteLayerId)
-            self:paintTerrainAtLayer(px, borderMaxZ, concreteLayerId)
-        end
-        for pz = borderMinZ, borderMaxZ, AREA_FILL_STEP do
-            self:paintTerrainAtLayer(borderMinX, pz, concreteLayerId)
-            self:paintTerrainAtLayer(borderMaxX, pz, concreteLayerId)
-        end
-        debugPrintf("[TestRig] border painted: X[%.2f, %.2f] Z[%.2f, %.2f]", borderMinX, borderMaxX, borderMinZ, borderMaxZ)
-    else
-        debugPrint("[TestRig] CONCRETEINDUSTRIAL layer not found, skipping border")
-    end
-end
+-- placeFoliageTestRig moved to WAILA (WailaDebugTools) - pure world/map
+-- investigation, never read or wrote iw.xml/the foliage palette.
 
 function ImmersiveWeathering:onDebugFieldRaycastCallback(
     hitObjectId,
