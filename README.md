@@ -19,23 +19,16 @@ Pairs with [FS25_whatAmILookingAt](https://github.com/ubuntu811/FS25_whatAmILook
   stuck as whatever it first landed on if you change the bias later.
 - **Displace**: off-field deco bushes (not ordinary ground cover) have a
   separate chance to get flattened into short grass.
-- Ground already converted to dirt/gravel is kept free of regrowing
-  foliage automatically, no roll needed.
+- Driving back over ground you've already converted to dirt/gravel keeps
+  sweeping any regrowth off it automatically - unlike wither/material
+  drift/displace above, this isn't a dice roll, it happens on every pass
+  over already-converted ground, so paths you actually drive stay looking
+  driven.
 
 Effects are scaled down per vehicle by wheel count, so a 6-wheeled
 combine doesn't wear ground 6x faster than a 2-wheeled ATV at the same
 dial setting. AI-driven vehicles are unconditionally excluded - player
 driving only, by design.
-
-**Manual overrides** - two crosshair-aimed tools for fixing a spot on the
-spot instead of waiting on dice:
-- **Swap dirt/gravel**: reads whatever material is at the crosshair and
-  repaints it to the other one, over a small area.
-- **Sow grass**: unconditionally repaints an area back to grass and seeds
-  short grass on it, regardless of what's currently there (dirt, gravel,
-  even a flat texture left behind by an unrelated map-painting tool) -
-  the "undo" for an overworn patch, or for cleaning up after something
-  else entirely.
 
 **Seeders sow grass too** - any vehicle with the sowing-machine
 specialization (a real crop seeder, or a hand-pushed one) repaints bare
@@ -53,8 +46,8 @@ independent of whether anyone's driven there.
 ## Where this operates
 
 Every mechanic here is off-field only - real farmland (anything inside a
-defined field boundary) is never touched, whether that's tyre effects,
-the manual tools, or a seeder sowing grass. Wither and the seeder feature
+defined field boundary) is never touched, whether that's tyre effects or
+a seeder sowing grass. Wither and the seeder feature
 additionally raycast straight down before painting or placing anything,
 so ground that happens to still read as grass/dirt/gravel underneath a
 road, rail line, or building isn't touched either - only open ground
@@ -69,16 +62,15 @@ current binding, not the default.
 | Key | Action |
 |---|---|
 | `Left Shift + T` | Toggle tyre weathering on/off |
-| `Left Shift + B` | Cycle tyre withering chance (0-100%, 20% steps) |
-| `Left Shift + V` | Toggle tyre withering material bias (dirt-leaning / gravel-leaning) |
-| `Left Shift + G` | Swap dirt/gravel at the crosshair |
-| `Left Shift + S` | Sow grass at the crosshair (works on anything, not just dirt/gravel) |
-| `Left Shift + H` | Set the nightly-sweep weather target to where you're looking |
-| `Left Shift + N` | Run a weathering sweep immediately |
-| `Left Shift + I` | Cycle sweep sample count (1000-10000) |
+| `Left Shift + H` | Weather what you're looking at - a 5x5m area around the crosshair, immediately |
+| `Left Shift + N` | Run a full weathering sweep immediately |
+| `Left Shift + Ctrl + M` | Debug tools menu (test rig, area fill - not needed for normal play) |
+
+Tyre withering chance, material bias, and nightly-sweep sample count are
+set on the Settings page (Options > Mod Settings), not a keybind.
 
 An always-visible HUD (bottom-left area) shows current settings and live
-keybinds for all of the above.
+keybinds for the actions above.
 
 ## Install
 
