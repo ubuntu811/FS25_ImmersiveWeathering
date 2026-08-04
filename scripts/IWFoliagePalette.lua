@@ -76,6 +76,11 @@ function IWFoliagePalette.new()
     -- unchanged - this only adds a second, more specific lookup findEntry
     -- checks first.
     self.specificEntriesByNameAndState = {}
+    -- <groundMapping> entries (ground TEXTURE, a separate namespace from
+    -- foliage entries above) - empty by default, meaning "no iw.xml
+    -- groundMapping declared", which callers use as the signal to fall
+    -- back to the hardcoded TYRE_PAINT_PALETTES behavior.
+    self.groundEntriesByName = {}
     self:load()
     return self
 end
@@ -187,6 +192,78 @@ function IWFoliagePalette:load()
         index = index + 1
     end
 
+    -- <groundMapping> - a completely separate section/namespace from
+    -- <foliageMapping> above (ground TEXTURE, not foliage). Entry names
+    -- ("dirt"/"gravel") match the player's existing Settings-page toggle,
+    -- not anything in entriesByName. Absent entirely (older iw.xml, or no
+    -- iw.xml at all) leaves groundEntriesByName empty - callers fall back
+    -- to the hardcoded TYRE_PAINT_PALETTES behavior in that case, same
+    -- backward-compat shape as the foliage fallback above.
+    local groundEntriesByName = {}
+    local groundIndex = 0
+
+    while true do
+        local key = string.format("iwConfig.groundMapping.entry(%d)", groundIndex)
+
+        if not xmlFile:hasProperty(key) then
+            break
+        end
+
+        local name = xmlFile:getString(key .. "#name")
+
+        if name ~= nil then
+            local groundEntry = {
+                name = name,
+                textures = {},
+                foliages = {},
+            }
+
+            local textureIndex = 0
+            while true do
+                local textureKey = string.format("%s.texture(%d)", key, textureIndex)
+
+                if not xmlFile:hasProperty(textureKey) then
+                    break
+                end
+
+                local textureName = xmlFile:getString(textureKey .. "#name")
+
+                if textureName ~= nil then
+                    table.insert(groundEntry.textures, {
+                        name = textureName,
+                        chance = xmlFile:getInt(textureKey .. "#chance", 0),
+                    })
+                end
+
+                textureIndex = textureIndex + 1
+            end
+
+            local foliageIndex = 0
+            while true do
+                local foliageKey = string.format("%s.foliage(%d)", key, foliageIndex)
+
+                if not xmlFile:hasProperty(foliageKey) then
+                    break
+                end
+
+                local foliageName = xmlFile:getString(foliageKey .. "#name")
+
+                if foliageName ~= nil then
+                    table.insert(groundEntry.foliages, {
+                        name = foliageName,
+                        chance = xmlFile:getInt(foliageKey .. "#chance", 0),
+                    })
+                end
+
+                foliageIndex = foliageIndex + 1
+            end
+
+            groundEntriesByName[name] = groundEntry
+        end
+
+        groundIndex = groundIndex + 1
+    end
+
     xmlFile:delete()
 
     if #entries > 0 or specificCount > 0 then
@@ -197,6 +274,16 @@ function IWFoliagePalette:load()
 
         self.specificEntriesByNameAndState = specificEntriesByNameAndState
         debugPrintf("loaded %d general + %d specific entries from %s", #entries, specificCount, iwXMLFilename)
+    end
+
+    local groundCount = 0
+    for _ in pairs(groundEntriesByName) do
+        groundCount = groundCount + 1
+    end
+
+    if groundCount > 0 then
+        self.groundEntriesByName = groundEntriesByName
+        debugPrintf("loaded %d ground entries from %s", groundCount, iwXMLFilename)
     end
 end
 
@@ -350,4 +437,59 @@ function IWFoliagePalette:getSeederEntry()
     end
 
     return self.fallbackEntry
+end
+
+-- Public: find a <groundMapping> entry by name ("dirt"/"gravel", matching
+-- the player's Settings-page toggle) - nil if no iw.xml groundMapping
+-- declared it, which callers use as the signal to fall back to the
+-- hardcoded TYRE_PAINT_PALETTES behavior.
+function IWFoliagePalette:findGroundEntry(name)
+    if name == nil then
+        return nil
+    end
+
+    return self.groundEntriesByName[name]
+end
+
+-- Public: weighted pick among a ground entry's real texture layer names -
+-- same cumulative-weight shape as pickFreshEntry, separate roll/domain.
+-- Returns nil if the entry has no textures declared (shouldn't normally
+-- happen, but callers should treat nil as "nothing to paint" not crash).
+function IWFoliagePalette:pickGroundTexture(groundEntry)
+    if groundEntry == nil or #groundEntry.textures == 0 then
+        return nil
+    end
+
+    local roll = math.random() * 100
+    local cumulative = 0
+
+    for _, texture in ipairs(groundEntry.textures) do
+        cumulative = cumulative + texture.chance
+
+        if roll <= cumulative then
+            return texture.name
+        end
+    end
+
+    return groundEntry.textures[#groundEntry.textures].name
+end
+
+-- Public: independent roll per <foliage> child - "also plant this here",
+-- not a weighted single pick like pickGroundTexture (multiple foliages on
+-- the same ground entry could each fire on the same hit, or none at all).
+-- Returns the foliage entry NAME to look up via findEntry, or nil if
+-- nothing rolled. Caller is responsible for findEntry+pickInitialStage -
+-- this only decides WHICH name, not what stage.
+function IWFoliagePalette:rollGroundFoliage(groundEntry)
+    if groundEntry == nil then
+        return nil
+    end
+
+    for _, foliage in ipairs(groundEntry.foliages) do
+        if foliage.chance > 0 and math.random() * 100 <= foliage.chance then
+            return foliage.name
+        end
+    end
+
+    return nil
 end

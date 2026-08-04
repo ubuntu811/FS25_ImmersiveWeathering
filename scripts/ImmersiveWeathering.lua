@@ -57,6 +57,12 @@ local TYRE_PAINT_PALETTES = {
 local TYRE_PAINT_PALETTE_DEFAULT_INDEX = 1
 -- i18n keys, one per TYRE_PAINT_PALETTES entry, in the same order.
 local TYRE_PAINT_PALETTE_LABELS = {"iw_material_dirt", "iw_material_gravel"}
+-- iw.xml <groundMapping> entry names, same order/index as
+-- TYRE_PAINT_PALETTES/TYRE_PAINT_PALETTE_LABELS above - the Settings-page
+-- toggle itself stays fixed at these two options; iw.xml supplies their
+-- content (which real texture layers, what weights, foliage chance), not
+-- the toggle's own option count.
+local TYRE_PAINT_PALETTE_NAMES = {"dirt", "gravel"}
 
 -- How many random coordinates each day-change sweep samples - was a fixed
 -- local before, now a toggle so a denser sweep can be tested without
@@ -1966,15 +1972,48 @@ function ImmersiveWeathering:paintTerrainAtLayer(x, z, layerId)
     paint:apply(false, "onPaintApplied", callbackTarget)
 end
 
+-- iw.xml <groundMapping> drives this when present (real texture layer
+-- weights + optional "also plant this foliage" chance), falling back to
+-- the hardcoded TYRE_PAINT_PALETTES 90/10 split with no foliage chance
+-- when absent - same backward-compat shape the foliage palette already
+-- uses. The Settings-page toggle itself is unchanged either way, only
+-- which source supplies the toggle's two options' actual content.
 function ImmersiveWeathering:paintWitherMaterial(x, z)
-    local palette = TYRE_PAINT_PALETTES[self.config:getTyrePaintPaletteIndex()]
-    local materialName = pickPaintMaterial(palette.entries)
+    local index = self.config:getTyrePaintPaletteIndex()
+    local groundEntry = self.foliagePalette:findGroundEntry(TYRE_PAINT_PALETTE_NAMES[index])
+
+    local materialName
+    if groundEntry ~= nil then
+        materialName = self.foliagePalette:pickGroundTexture(groundEntry)
+    else
+        local palette = TYRE_PAINT_PALETTES[index]
+        materialName = pickPaintMaterial(palette.entries)
+    end
+
+    if materialName == nil then
+        return false
+    end
+
     local layerId = self:getTerrainLayerIdByName(materialName)
     if layerId == nil then
         return false
     end
 
     self:paintTerrainAtLayer(x, z, layerId)
+
+    if groundEntry ~= nil then
+        local foliageEntryName = self.foliagePalette:rollGroundFoliage(groundEntry)
+
+        if foliageEntryName ~= nil then
+            local foliageEntry = self.foliagePalette:findEntry(foliageEntryName)
+
+            if foliageEntry ~= nil then
+                local stage = self.foliagePalette:pickInitialStage(foliageEntry)
+                local writeName = self.foliagePalette:getWriteName(foliageEntry, stage)
+                self:placeFoliage(x, z, writeName)
+            end
+        end
+    end
 
     return true, materialName
 end

@@ -95,6 +95,14 @@ in that repo for Windows+Steam+WSL+Claude Code setup, the
 `build.sh`/`deploy.sh` pattern, and a running list of real engine gotchas
 hit building this mod pair.
 
+## Credits
+
+TerraFarm, FS25_LumberJack, FS25_PowerTools, and FS25_allTheFoliage all
+contributed real, working source that answered engine-API questions
+`scriptBinding.xml` alone couldn't - see WAILA's
+[README credits section](https://github.com/ubuntu811/FS25_whatAmILookingAt#credits)
+for the specifics of what came from where.
+
 ## License
 
 GPLv3 - see [LICENSE](LICENSE).
