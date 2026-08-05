@@ -48,7 +48,7 @@ local GRASS_SHORT_FALLBACK_ENTRY = {
     chance = 100,
     stageMin = 0,
     stageMax = 0,
-    randomStage = false,
+    sequential = true,
     clusters = false,
     mutateChance = 0,
     mutatesTo = {},
@@ -136,7 +136,7 @@ function IWFoliagePalette:load()
             -- once something's already sitting at that exact state.
             -- stageMin/stageMax default to just that one state (today's
             -- narrow behavior), but aren't forced to it - a specific entry
-            -- can explicitly declare its own wider range + randomStage to
+            -- can explicitly declare its own wider range + sequential to
             -- diversify via growth/spread exactly like a general entry
             -- would, while still carrying whatever extra behavior (e.g.
             -- mutateChance) makes it worth being a specific override in
@@ -153,7 +153,7 @@ function IWFoliagePalette:load()
                 chance = xmlFile:getInt(key .. "#chance", 0),
                 stageMin = xmlFile:getInt(key .. "#stageMin", isSpecific and state or 0),
                 stageMax = xmlFile:getInt(key .. "#stageMax", isSpecific and state or 0),
-                randomStage = xmlFile:getString(key .. "#randomStage", "false") == "true",
+                sequential = xmlFile:getString(key .. "#sequential", "true") == "true",
                 clusters = xmlFile:getString(key .. "#clusters", "false") == "true",
                 grow = xmlFile:getString(key .. "#grow", "true") == "true",
                 mutateChance = xmlFile:getInt(key .. "#mutateChance", 0),
@@ -214,6 +214,7 @@ function IWFoliagePalette:load()
         if name ~= nil then
             local groundEntry = {
                 name = name,
+                seeder = xmlFile:getString(key .. "#seeder", "false") == "true",
                 textures = {},
                 foliages = {},
                 mutatesTo = {},
@@ -356,7 +357,7 @@ end
 
 -- Public: the stage a fresh placement of this entry should start at.
 function IWFoliagePalette:pickInitialStage(entry)
-    if entry.randomStage then
+    if not entry.sequential then
         return math.random(entry.stageMin, entry.stageMax)
     end
 
@@ -364,25 +365,26 @@ function IWFoliagePalette:pickInitialStage(entry)
 end
 
 -- Public: the stage an existing patch should move to on a repeat hit.
--- randomStage entries (unrelated species/model variants, e.g. decoBush/
+-- Non-sequential entries (unrelated species/model variants, e.g. decoBush/
 -- decoFoliage) structurally never grow, full stop - not "unless grow is
 -- also explicitly set false". A pool of unrelated flowers/bushes has no
 -- meaningful order to advance through, so "growth" on one of these was
 -- never anything but a full reroll to a random different species -
 -- exactly the churn that made an established poppy patch turn into
--- lavender on a later hit. The only legitimate way a randomStage entry's
--- identity changes at all is a deliberate mutateChance roll (a real
--- succession event, not incidental reroll noise). Checked first and
+-- lavender on a later hit. The only legitimate way a non-sequential
+-- entry's identity changes at all is a deliberate mutateChance roll (a
+-- real succession event, not incidental reroll noise). Checked first and
 -- unconditionally, so no entry needs to separately remember grow="false"
--- to get this - it was too easy to add randomStage without it (or add it
--- to one entry and forget the next).
+-- to get this - it was too easy to add sequential="false" without it (or
+-- add it to one entry and forget the next).
 --
--- grow=false only still matters for ordered (non-randomStage) entries -
--- a real growth-stage progression an author wants frozen for some other
--- reason. Spread is unaffected either way - it uses pickSpreadStage, not
--- this function.
+-- grow=false only still matters for sequential entries - a real
+-- growth-stage progression an author wants frozen for some other reason.
+-- On a non-sequential entry, grow is dead - never advances regardless of
+-- what it says. Spread is unaffected either way - it uses pickSpreadStage,
+-- not this function.
 function IWFoliagePalette:growStage(entry, currentStage)
-    if entry.randomStage then
+    if not entry.sequential then
         return currentStage or entry.stageMin
     end
 
@@ -401,17 +403,17 @@ end
 
 -- Public: the stage a NEW cluster node (a spread neighbor) should start
 -- at - distinct from pickInitialStage, which answers "what should a
--- brand-new instance on empty ground be." Ordered entries (a real
+-- brand-new instance on empty ground be." Sequential entries (a real
 -- growth-stage progression, e.g. meadow) are the same either way: a
 -- spread node is genuinely a young new plant, starting at stageMin and
--- growing up on its own subsequent visits. randomStage entries (unrelated
--- species/model variants, e.g. decoBush/decoFoliage) are not - they're a
--- pool of distinct flowers/bushes, not a sequence, so spreading a poppy
--- patch should clone more poppies next to it, not reroll into a random
--- different flower (the same reasoning growStage's grow=false already
--- applies to growth, just for spread instead).
+-- growing up on its own subsequent visits. Non-sequential entries
+-- (unrelated species/model variants, e.g. decoBush/decoFoliage) are not -
+-- they're a pool of distinct flowers/bushes, not a sequence, so spreading
+-- a poppy patch should clone more poppies next to it, not reroll into a
+-- random different flower (the same reasoning growStage's grow=false
+-- already applies to growth, just for spread instead).
 function IWFoliagePalette:pickSpreadStage(entry, currentStage)
-    if entry.randomStage then
+    if not entry.sequential then
         return currentStage or self:pickInitialStage(entry)
     end
 
@@ -471,6 +473,24 @@ function IWFoliagePalette:findGroundEntry(name)
     end
 
     return self.groundEntriesByName[name]
+end
+
+-- Public: the groundMapping entry a real seeder vehicle should paint
+-- underneath, or nil if the loaded palette flagged nothing (caller falls
+-- back to the hardcoded "GRASS" layer in that case). Mirrors
+-- getSeederEntry's own shape exactly - a seeder="true" flag on whichever
+-- entry the map author picks, not a fixed reserved name. Nothing about
+-- this requires the flagged entry to actually be grass - a map author
+-- gets to decide what a real seeder pass paints, same as they already
+-- decide what it plants.
+function IWFoliagePalette:getSeederGroundEntry()
+    for _, groundEntry in pairs(self.groundEntriesByName) do
+        if groundEntry.seeder then
+            return groundEntry
+        end
+    end
+
+    return nil
 end
 
 -- Public: weighted pick among a ground entry's real texture layer names -

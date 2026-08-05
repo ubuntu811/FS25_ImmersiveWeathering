@@ -25,33 +25,47 @@ Pairs with [FS25_whatAmILookingAt](https://github.com/ubuntu811/FS25_whatAmILook
   over already-converted ground, so paths you actually drive stay looking
   driven.
 
-Effects are scaled down per vehicle by wheel count, so a 6-wheeled
-combine doesn't wear ground 6x faster than a 2-wheeled ATV at the same
-dial setting. AI-driven vehicles are unconditionally excluded - player
-driving only, by design.
+Effects can be scaled down per vehicle by wheel count, via the "Wheel
+count sensitivity" Settings-page dial - at 100%, a 6-wheeled combine
+doesn't wear ground 6x faster than a 2-wheeled ATV at the same dial
+setting; at 0%, every wheel rolls independently (today's default is
+100%, unchanged from before this was configurable). AI-driven vehicles
+are unconditionally excluded - player driving only, by design.
 
-**Seeders sow grass too** - any vehicle with the sowing-machine
-specialization (a real crop seeder, or a hand-pushed one) repaints bare
-dirt/gravel to grass and seeds short grass on genuinely empty ground
-while it's actually working (confirmed via the seeder's own real
-activation state, not just "engine on" or "implement lowered" - neither
-turned out to correlate with whether it's actually sowing). Never
-touches ground where something's already growing - this only fills in
-bare ground, it doesn't overwrite existing bushes or deco.
+**Seeders sow grass on meadows** - this mod is trying to give you the 
+most immersive way possible to manage the changes we're doing. So, I'm trying
+to avoid forcing you to use the construction menu to undo damaged meadows, 
+instead just drive a seeder (turned on and lowered, as you would on a field)
+over the meadow. (Hand tool is supported too).
+It will repaint dirt/gravel to grass and seed short grass (or what you 
+configure in the maps integration xml, see below).
+It never touches ground where something's already growing - this only fills
+in bare ground, it doesn't overwrite existing bushes or deco.
+Works independently of the tyre weathering toggle (`Left Shift + T`) - so
+turning that off to protect a patch you just seeded from your own
+tractor's front wheels doesn't also disable the seeder. The seeder has
+its own on/off already (whether it's actually turned on and lowered).
 
 **Nightly weathering loops** - a periodic sweep samples random points
 across gravel/dirt areas and lets weeds/grass creep back in over time,
 independent of whether anyone's driven there.
+For testing, feel free to call the same function via the hotkey Left Shift + N, see below. 
 
 ## Where this operates
 
 Every mechanic here is off-field only - real farmland (anything inside a
 defined field boundary) is never touched, whether that's tyre effects or
-a seeder sowing grass. Wither and the seeder feature
-additionally raycast straight down before painting or placing anything,
-so ground that happens to still read as grass/dirt/gravel underneath a
-road, rail line, or building isn't touched either - only open ground
-under open sky.
+a seeder sowing grass. Tyre effects or crop destruction there is completely
+managed by the in game config, we're not touching that. 
+Also, only ground that already reads as dirt, gravel, sand, or grass is
+touched at all - a fixed allowlist in the Lua
+(`WEATHERABLE_MATERIALS`/`GRASS_MATERIAL_ONLY`/`TERRAIN_REGROWTH_TARGETS`
+in `scripts/ImmersiveWeathering.lua`), not something `iw.xml` extends.
+So e.g. concrete reads as its own separate material and is never touched,
+no matter what `iw.xml` declares - `iw.xml` only customizes *what*
+happens on ground IW already recognizes, it can't add new material types
+to touch.
+Anything underneath map objects (buildings, roads etc) will not be touched either. 
 
 ## Controls
 
@@ -64,13 +78,27 @@ current binding, not the default.
 | `Left Shift + T` | Toggle tyre weathering on/off |
 | `Left Shift + H` | Weather what you're looking at - a 5x5m area around the crosshair, immediately |
 | `Left Shift + N` | Run a full weathering sweep immediately |
-| `Left Shift + Ctrl + M` | Debug tools menu (test rig, area fill - not needed for normal play) |
+| `Left Shift + Ctrl + M` | Debug tools menu (area fill - not needed for normal play) |
 
-Tyre withering chance, material bias, and nightly-sweep sample count are
-set on the Settings page (Options > Mod Settings), not a keybind.
+Tyre withering chance, material bias, nightly-sweep sample count, wheel
+count sensitivity, and verbose debug logging are all set on the Settings
+page (Options > Mod Settings), not a keybind.
 
 An always-visible HUD (bottom-left area) shows current settings and live
 keybinds for the actions above.
+
+## Settings
+
+All on the Settings page (Options > Mod Settings), admin-only in
+multiplayer:
+
+| Setting | What it does | Options |
+|---|---|---|
+| Tyre withering chance | How often grass converts to dirt/gravel under tyre contact | 0/20/40/60/80/100% |
+| Tyre withering material bias | Which material fresh conversions lean toward | Dirt-leaning / Gravel-leaning |
+| Nightly sweep sample count | How many points the nightly weathering sweep samples - higher covers more ground per sweep but costs more per run | 1000/2000/4000/6000/8000/10000 |
+| Wheel count sensitivity | How much extra wheels discount chance per wheel - 0% = every wheel rolls independently (more wheels = more effect overall), 100% = a many-wheeled vehicle wears ground at the same overall rate as a 2-wheeled one | 0/20/40/60/80/100% |
+| Verbose debug logging | Logs every tyre material drift/wither/clear event. Off by default - many-wheeled vehicles can fire dozens of these per tick, which costs performance | Off / On |
 
 ## Install
 

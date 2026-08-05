@@ -20,7 +20,7 @@
 IWSettingsUI = {}
 local IWSettingsUI_mt = Class(IWSettingsUI)
 
-function IWSettingsUI.new(config, tyreWitherLevelLabels, tyrePaintPaletteLabels, sweepSampleCounts)
+function IWSettingsUI.new(config, tyreWitherLevelLabels, tyrePaintPaletteLabels, sweepSampleCounts, wheelSensitivityLabels, verboseLoggingLabels)
     local self = setmetatable({}, IWSettingsUI_mt)
 
     self.controls = {}
@@ -28,6 +28,8 @@ function IWSettingsUI.new(config, tyreWitherLevelLabels, tyrePaintPaletteLabels,
     self.tyreWitherLevelLabels = tyreWitherLevelLabels
     self.tyrePaintPaletteLabels = tyrePaintPaletteLabels
     self.sweepSampleCounts = sweepSampleCounts
+    self.wheelSensitivityLabels = wheelSensitivityLabels
+    self.verboseLoggingLabels = verboseLoggingLabels
     self.isInitialized = false
 
     return self
@@ -59,6 +61,8 @@ function IWSettingsUI:injectUiSettings()
         { name = "tyreWitherLevelIndex", values = self.tyreWitherLevelLabels, autoBind = true, nillable = false },
         { name = "tyrePaintPaletteIndex", values = self.tyrePaintPaletteLabels, autoBind = true, nillable = false },
         { name = "sweepSampleCountIndex", values = self.sweepSampleCounts, autoBind = true, nillable = false },
+        { name = "wheelSensitivityIndex", values = self.wheelSensitivityLabels, autoBind = true, nillable = false },
+        { name = "verboseLoggingIndex", values = self.verboseLoggingLabels, autoBind = true, nillable = false },
     }
 
     UIHelper.createControlsDynamically(settingsPage, "iw_setting_title", self, controlProperties, "iw_")

@@ -64,6 +64,30 @@ local TYRE_PAINT_PALETTE_LABELS = {"iw_material_dirt", "iw_material_gravel"}
 -- the toggle's own option count.
 local TYRE_PAINT_PALETTE_NAMES = {"dirt", "gravel"}
 
+-- How much wheelCount actually discounts chance - 0% means every wheel
+-- rolls its own full, unscaled chance independently (more wheels = more
+-- rolls, no per-wheel discount at all); 100% is today's original behavior
+-- (full linear division, so a 6-wheeled combine doesn't wear ground 6x
+-- faster than a 2-wheeled ATV at the same dial setting). Values between
+-- are a partial blend. Reuses TYRE_WITHER_LEVELS' own 0/20/40/60/80/100%
+-- shape and l10n keys (iw_wither_pct_*) - identical percentage meaning,
+-- no reason for a second set of duplicate labels.
+local WHEEL_SENSITIVITY_LEVELS = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}
+local WHEEL_SENSITIVITY_DEFAULT_INDEX = 6
+
+-- Real cost found live: a big multi-axle vehicle+trailer combo can fire a
+-- dozen+ of the tyre debugPrintf calls below within the same tick (every
+-- wheel independently rolling clear/drift/wither/displace), each one both
+-- a string-format+print AND (for drift/wither/displace) a real
+-- TerrainDeformation paint operation - confirmed as an actual lag spike,
+-- not a hypothetical one. Defaults ON (today's behavior, and these tags
+-- are genuinely how the whole palette/ground system got debugged
+-- tonight) - this is for turning it off once you're not actively
+-- debugging, not a permanent recommendation to disable it.
+local VERBOSE_LOGGING_LEVELS = {false, true}
+local VERBOSE_LOGGING_DEFAULT_INDEX = 2
+local VERBOSE_LOGGING_LABELS = {"iw_off", "iw_on"}
+
 -- How many random coordinates each day-change sweep samples - was a fixed
 -- local before, now a toggle so a denser sweep can be tested without
 -- editing code (heavier, but the sweep is off the main thread's hot path
@@ -206,14 +230,18 @@ function ImmersiveWeathering:loadMap(_)
     self.config = IWConfig.new(
         TYRE_WITHER_DEFAULT_INDEX,
         TYRE_PAINT_PALETTE_DEFAULT_INDEX,
-        SWEEP_SAMPLE_COUNT_DEFAULT_INDEX
+        SWEEP_SAMPLE_COUNT_DEFAULT_INDEX,
+        WHEEL_SENSITIVITY_DEFAULT_INDEX,
+        VERBOSE_LOGGING_DEFAULT_INDEX
     )
 
     self.settingsUI = IWSettingsUI.new(
         self.config,
         TYRE_WITHER_LEVEL_LABELS,
         TYRE_PAINT_PALETTE_LABELS,
-        SWEEP_SAMPLE_COUNT_LABELS
+        SWEEP_SAMPLE_COUNT_LABELS,
+        TYRE_WITHER_LEVEL_LABELS,
+        VERBOSE_LOGGING_LABELS
     )
 
     -- Loads the current map's own iw.xml if present (sibling to map.xml),
@@ -686,9 +714,12 @@ function ImmersiveWeathering:showDebugMenu()
     -- helpers were already at hand. Fill area is the one exception kept
     -- here for now - unclear yet whether its gravel-not-grassShort
     -- behavior is a real bug worth tracing before deciding where it
-    -- belongs.
+    -- belongs. Dump config validity is the opposite of the tools that
+    -- left - it's about iw.xml's own content, not the world, so it
+    -- belongs here permanently.
     local actions = {
         { "Fill area (debug)", self.placeFoliageAreaFill },
+        { "Dump iw.xml config validity", self.dumpConfigValidity },
     }
 
     local options = {}
@@ -972,6 +1003,85 @@ function ImmersiveWeathering:placeFoliageAreaFill()
 
     debugPrintf("[AreaFill] %dx%dm mixed-material paint around (%.2f %.2f): %d/%d stamps placed",
         AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, placed, ((AREA_FILL_SIZE / AREA_FILL_STEP) + 1) ^ 2)
+end
+
+-- Dumps the loaded iw.xml palette's own validity against the real engine -
+-- one line per entry, every reference it makes (a texture layer name, a
+-- foliage layer/state, a cross-entry mutatesTo target) marked OK/MISSING.
+-- Squarely IW's own domain (validating iw.xml's own content, not world/
+-- terrain reverse engineering), unlike the tools that moved to WAILA -
+-- this is why IW keeps its own debug menu instead of folding entirely
+-- into WAILA's. Complements check_foliage_sync.py (map.xml vs real I3D/
+-- descriptors, no game load needed) with the other half: iw.xml vs what's
+-- actually loaded and resolvable right now, in this running game.
+function ImmersiveWeathering:dumpConfigValidity()
+    local palette = self.foliagePalette
+    local foliageSystem = g_currentMission.foliageSystem
+
+    debugPrintf("[ConfigDump] === foliageMapping (%d entries) ===", #palette.entries)
+    for _, entry in ipairs(palette.entries) do
+        local stageParts = {}
+        for stage = entry.stageMin, entry.stageMax do
+            local writeName = palette:getWriteName(entry, stage)
+            local ok = foliageSystem:getIsDecoLayerDefined(writeName)
+            table.insert(stageParts, string.format("%s=%s", writeName, ok and "OK" or "MISSING"))
+        end
+
+        local mutateParts = {}
+        for _, mutate in ipairs(entry.mutatesTo) do
+            local targetOk = palette.entriesByName[mutate.name] ~= nil
+            table.insert(mutateParts, string.format("%s=%s", mutate.name, targetOk and "OK" or "MISSING"))
+        end
+
+        debugPrintf(
+            "[ConfigDump]   %s chance=%d sequential=%s stages[%s]%s",
+            entry.name,
+            entry.chance,
+            tostring(entry.sequential),
+            table.concat(stageParts, " "),
+            #mutateParts > 0 and (" mutatesTo[" .. table.concat(mutateParts, " ") .. "]") or ""
+        )
+    end
+
+    local groundEntryCount = 0
+    for _ in pairs(palette.groundEntriesByName) do
+        groundEntryCount = groundEntryCount + 1
+    end
+
+    if groundEntryCount == 0 then
+        debugPrintf("[ConfigDump] === groundMapping: none declared, using built-in dirt/gravel split ===")
+        return
+    end
+
+    debugPrintf("[ConfigDump] === groundMapping (%d entries) ===", groundEntryCount)
+    for name, groundEntry in pairs(palette.groundEntriesByName) do
+        local textureParts = {}
+        for _, texture in ipairs(groundEntry.textures) do
+            local ok = self:getTerrainLayerIdByName(texture.name) ~= nil
+            table.insert(textureParts, string.format("%s(%d%%)=%s", texture.name, texture.chance, ok and "OK" or "MISSING"))
+        end
+
+        local foliageParts = {}
+        for _, foliage in ipairs(groundEntry.foliages) do
+            local ok = palette.entriesByName[foliage.name] ~= nil
+            table.insert(foliageParts, string.format("%s(%d%%)=%s", foliage.name, foliage.chance, ok and "OK" or "MISSING"))
+        end
+
+        local mutateParts = {}
+        for _, mutate in ipairs(groundEntry.mutatesTo) do
+            local ok = palette.groundEntriesByName[mutate.name] ~= nil
+            table.insert(mutateParts, string.format("%s(%d%%,%s)=%s", mutate.name, mutate.chance, tostring(mutate.condition), ok and "OK" or "MISSING"))
+        end
+
+        debugPrintf(
+            "[ConfigDump]   %s%s: textures[%s]%s%s",
+            name,
+            groundEntry.seeder and " (seeder)" or "",
+            table.concat(textureParts, " "),
+            #foliageParts > 0 and (" foliage[" .. table.concat(foliageParts, " ") .. "]") or "",
+            #mutateParts > 0 and (" mutatesTo[" .. table.concat(mutateParts, " ") .. "]") or ""
+        )
+    end
 end
 
 -- placeFoliageTestRig moved to WAILA (WailaDebugTools) - pure world/map
@@ -1417,9 +1527,9 @@ function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force, allowFr
                 and self:fieldIsMaterial(nx, nz, WEATHERABLE_MATERIALS)
                 and self:isSpotClearForFoliage(nx, nz)
             then
-                -- Ordered entries (meadow) spread as a fresh young
+                -- Sequential entries (meadow) spread as a fresh young
                 -- instance, starting at stageMin and growing up on its own
-                -- subsequent visits. randomStage entries (unrelated
+                -- subsequent visits. Non-sequential entries (unrelated
                 -- species/model variants) instead clone the SOURCE's own
                 -- current species - spreading shouldn't turn a poppy patch
                 -- into a random different flower at the edges, any more
@@ -1947,6 +2057,22 @@ function ImmersiveWeathering:getTerrainLayerIdByName(name)
     return nil
 end
 
+-- Public: the terrain layer id the real-seeder path should paint. Reuses
+-- the exact same groundMapping mechanism wither already uses for dirt/
+-- gravel (a weighted pick among real texture layer names, e.g. a mosaic
+-- of grass01/grassDry01/... instead of one flat texture) - via
+-- getSeederGroundEntry's seeder="true" flag, not a fixed reserved entry
+-- name. No hardcoded assumption that a seeder paints grass specifically -
+-- a map author could just as easily flag their "sand" entry instead, this
+-- doesn't care which. Falls back to the single hardcoded "GRASS" layer if
+-- no groundMapping entry is flagged seeder="true" (today's behavior,
+-- works on any map with zero author effort).
+function ImmersiveWeathering:getSeederTerrainLayerId()
+    local groundEntry = self.foliagePalette:getSeederGroundEntry()
+    local textureName = groundEntry ~= nil and self.foliagePalette:pickGroundTexture(groundEntry)
+    return self:getTerrainLayerIdByName(textureName or "GRASS")
+end
+
 -- Ground-texture paint, a different system entirely from the deco density
 -- maps everything else here writes to - none of these natives show up in
 -- scriptBinding.xml, confirmed instead against TerraFarm's actual working
@@ -2200,6 +2326,24 @@ function ImmersiveWeathering:getVehicleWheelCount(vehicle)
     return #wheels
 end
 
+-- Player-facing strength for how much wheelCount discounts chance - see
+-- WHEEL_SENSITIVITY_LEVELS' own comment. Linear blend between "no
+-- discount at all" (1) and "today's full linear division" (wheelCount)
+-- rather than an exponent, so the dial's percentage reads the same
+-- intuitive way the wither-chance dial already does.
+function ImmersiveWeathering:getEffectiveWheelCount(wheelCount)
+    local sensitivity = WHEEL_SENSITIVITY_LEVELS[self.config:getWheelSensitivityIndex()] or 1.0
+    return 1 + (wheelCount - 1) * sensitivity
+end
+
+function ImmersiveWeathering:isVerboseLoggingEnabled()
+    local enabled = VERBOSE_LOGGING_LEVELS[self.config:getVerboseLoggingIndex()]
+    if enabled == nil then
+        return true
+    end
+    return enabled
+end
+
 -- Clear, wither, and displace used to be three independent rolls against
 -- the same spot - meaning even at "20%" each, the real chance that
 -- SOMETHING happened to a given contact patch was close to
@@ -2297,7 +2441,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
 
             local layerId = nil
             if seederIsOn then
-                layerId = self:getTerrainLayerIdByName("GRASS")
+                layerId = self:getSeederTerrainLayerId()
             end
 
             if layerId ~= nil then
@@ -2310,6 +2454,15 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
                 end
             end
         else
+
+        -- Everything below this point is the wither/material-drift/
+        -- displace/clear side of tyre effects, gated by the player's own
+        -- Shift+T toggle - unlike the seeder branch above, which is
+        -- deliberately independent of it (see onWheelDestructionUpdate's
+        -- own comment on why).
+        if not self.config:isTyreEffectsEnabled() then
+            return
+        end
 
         -- clearDecoArea alone doesn't reliably remove ambient "meadow"/
         -- "forestGrass" - confirmed again by a spot that reads
@@ -2332,13 +2485,15 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
             self:placeFoliageInQuad(GRASS_LOW_WRITE, fx0, fz0, fx1, fz1, fx2, fz2)
             FSDensityMapUtil.clearDecoArea(fx0, fz0, fx1, fz1, fx2, fz2)
 
-            debugPrintf(
-                "[%s] wiped %s at (%.2f %.2f)",
-                tag,
-                clearedName,
-                fx,
-                fz
-            )
+            if self:isVerboseLoggingEnabled() then
+                debugPrintf(
+                    "[%s] wiped %s at (%.2f %.2f)",
+                    tag,
+                    clearedName,
+                    fx,
+                    fz
+                )
+            end
         end
 
         -- Keeping an already-converted spot free of regrowing/leftover
@@ -2367,10 +2522,10 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         -- else here. Targets disjoint ground from wither (dirt/gravel vs
         -- grass), so no aggregate-probability risk running alongside it.
         if self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS)
-            and math.random() <= self:getTyreWitherChance() / wheelCount
+            and math.random() <= self:getTyreWitherChance() / self:getEffectiveWheelCount(wheelCount)
         then
             local painted, materialName = self:paintWitherMaterial(centerX, centerZ)
-            if painted then
+            if painted and self:isVerboseLoggingEnabled() then
                 debugPrintf(
                     "[TyreMaterialDrift] -> %s at (%.2f %.2f)",
                     materialName,
@@ -2394,7 +2549,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
         -- cheap field/roll checks, so only pay for it on the fraction of
         -- frames that would otherwise actually succeed.
         if self:fieldIsMaterial(centerX, centerZ, GRASS_MATERIAL_ONLY)
-            and math.random() <= self:getTyreWitherChance() / wheelCount
+            and math.random() <= self:getTyreWitherChance() / self:getEffectiveWheelCount(wheelCount)
             and self:isSpotClearForFoliage(centerX, centerZ)
         then
             local painted, materialName = self:paintWitherMaterial(centerX, centerZ)
@@ -2407,18 +2562,20 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
                 -- roll, not left to the unconditional check above to
                 -- mop up next frame.
                 clearFoliageAt(centerX, centerZ, x0, z0, x1, z1, x2, z2, "TyreWither")
-                debugPrintf(
-                    "[TyreWither] grass -> %s at (%.2f %.2f)",
-                    materialName,
-                    centerX,
-                    centerZ
-                )
+                if self:isVerboseLoggingEnabled() then
+                    debugPrintf(
+                        "[TyreWither] grass -> %s at (%.2f %.2f)",
+                        materialName,
+                        centerX,
+                        centerZ
+                    )
+                end
             end
         end
 
         if not self:isOnField(centerX, centerZ)
             and not self:fieldIsMaterial(centerX, centerZ, TERRAIN_REGROWTH_TARGETS)
-            and math.random() <= TYRE_DISPLACE_CHANCE / wheelCount
+            and math.random() <= TYRE_DISPLACE_CHANCE / self:getEffectiveWheelCount(wheelCount)
         then
             local currentName = self:getFoliageNameAt(centerX, centerZ)
 
@@ -2436,7 +2593,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
             -- here means displace only touches bushes standing on
             -- untouched ground, not ground already part of a path.
             if currentName == BUSH then
-                if self:placeFoliage(centerX, centerZ, GRASS_LOW_WRITE) then
+                if self:placeFoliage(centerX, centerZ, GRASS_LOW_WRITE) and self:isVerboseLoggingEnabled() then
                     debugPrintf(
                         "[TyreDisplace] %s -> grass at (%.2f %.2f)",
                         currentName,
@@ -2460,10 +2617,14 @@ function ImmersiveWeathering:onWheelDestructionUpdate(
         return
     end
 
-    if not self.config:isTyreEffectsEnabled() then
-        return
-    end
-
+    -- Deliberately NOT gated on isTyreEffectsEnabled() here - that toggle
+    -- only covers the wither/material-drift/displace/clear branch
+    -- (processWheelContact's own else branch below), not the real-seeder
+    -- branch. A player wanting to fill in bare ground with a seeder
+    -- shouldn't have it constantly re-destroyed by their own tractor's
+    -- front wheels just because tyre effects happen to be off - the
+    -- seeder already has its own real on/off (isWorking/pushHandTool),
+    -- no separate enable needed on our end.
     local vehicle = wheelDestruction.vehicle
 
     -- WheelDestruction.update fires for every vehicle's wheels, hired AI

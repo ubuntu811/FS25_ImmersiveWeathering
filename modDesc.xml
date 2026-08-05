@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="93">
     <author>ubuntu811</author>
-    <version>1.6.0.0</version>
+    <version>1.7.0.0</version>
     <title>
         <en>Immersive Weathering</en>
     </title>
@@ -11,16 +11,12 @@
     <iconFilename>icon_immersive_weathering.dds</iconFilename>
     <multiplayer supported="true"/>
 
-    <!-- Not a hard requirement - IW works completely standalone (every
-         WailaHud/g_currentMission read is nil-guarded with a fallback).
-         Declared anyway because "works standalone" undersells it: without
-         WAILA installed, IW's own HUD panels lose their left-edge anchor
-         point and fall back to a fixed corner, and there's no live world
-         inspector to pair with the tyre/foliage mechanics at all - the
-         intended experience is genuinely the two together, not IW alone. -->
-    <dependencies>
-        <dependency>FS25_whatAmILookingAt</dependency>
-    </dependencies>
+    <!-- No hard dependency - IW works completely standalone now. WAILA is
+         still a nice-to-have (its HUD gives IW's own panels a left-edge
+         anchor point, and its debug tools are handy for inspecting the
+         ground IW is painting), but nothing here requires it to be
+         installed - every WAILA read is nil-guarded with its own
+         fallback. -->
 
     <extraSourceFiles>
         <sourceFile filename="scripts/UIHelper.lua" />
@@ -115,10 +111,24 @@
         <text name="iw_sweepSampleCountIndex_info">
             <en>How many points the nightly weathering sweep samples. Higher covers more ground per sweep but costs more per run.</en>
         </text>
+        <text name="iw_wheelSensitivityIndex_title">
+            <en>Wheel count sensitivity</en>
+        </text>
+        <text name="iw_wheelSensitivityIndex_info">
+            <en>How much extra wheels discount chance per wheel. 0% = every wheel rolls independently (more wheels = more effect overall); 100% = a many-wheeled vehicle wears ground the same overall rate as a 2-wheeled one.</en>
+        </text>
+        <text name="iw_verboseLoggingIndex_title">
+            <en>Verbose debug logging</en>
+        </text>
+        <text name="iw_verboseLoggingIndex_info">
+            <en>Log every tyre material drift/wither/clear event. Off by default - many-wheeled vehicles can fire dozens of these per tick, which costs performance.</en>
+        </text>
 
         <!-- Choice-control value labels - one per entry in
              TYRE_WITHER_LEVEL_LABELS/TYRE_PAINT_PALETTE_LABELS/
-             SWEEP_SAMPLE_COUNT_LABELS, same order. -->
+             SWEEP_SAMPLE_COUNT_LABELS, same order. iw_wither_pct_* is also
+             reused directly for wheelSensitivityIndex - identical 0/20/
+             40/60/80/100% meaning, no reason for duplicate labels. -->
         <text name="iw_wither_pct_0"><en>0%</en></text>
         <text name="iw_wither_pct_20"><en>20%</en></text>
         <text name="iw_wither_pct_40"><en>40%</en></text>
@@ -133,5 +143,7 @@
         <text name="iw_samples_6000"><en>6000</en></text>
         <text name="iw_samples_8000"><en>8000</en></text>
         <text name="iw_samples_10000"><en>10000</en></text>
+        <text name="iw_off"><en>Off</en></text>
+        <text name="iw_on"><en>On</en></text>
      </l10n>
 </modDesc>

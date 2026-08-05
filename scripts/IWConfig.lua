@@ -22,14 +22,18 @@ CONFIG_SCHEMA:register(XMLValueType.BOOL, "config#tyreEffectsEnabled")
 CONFIG_SCHEMA:register(XMLValueType.INT, "config#tyreWitherLevelIndex")
 CONFIG_SCHEMA:register(XMLValueType.INT, "config#tyrePaintPaletteIndex")
 CONFIG_SCHEMA:register(XMLValueType.INT, "config#sweepSampleCountIndex")
+CONFIG_SCHEMA:register(XMLValueType.INT, "config#wheelSensitivityIndex")
+CONFIG_SCHEMA:register(XMLValueType.INT, "config#verboseLoggingIndex")
 
-function IWConfig.new(defaultTyreWitherLevelIndex, defaultTyrePaintPaletteIndex, defaultSweepSampleCountIndex)
+function IWConfig.new(defaultTyreWitherLevelIndex, defaultTyrePaintPaletteIndex, defaultSweepSampleCountIndex, defaultWheelSensitivityIndex, defaultVerboseLoggingIndex)
     local self = setmetatable({}, IWConfig_mt)
 
     self.tyreEffectsEnabled = true
     self.tyreWitherLevelIndex = defaultTyreWitherLevelIndex
     self.tyrePaintPaletteIndex = defaultTyrePaintPaletteIndex
     self.sweepSampleCountIndex = defaultSweepSampleCountIndex
+    self.wheelSensitivityIndex = defaultWheelSensitivityIndex
+    self.verboseLoggingIndex = defaultVerboseLoggingIndex
 
     self.baseDir = getUserProfileAppPath() .. "modSettings/FS25_ImmersiveWeathering/"
     createFolder(self.baseDir)
@@ -50,6 +54,8 @@ function IWConfig:load()
     self.tyreWitherLevelIndex = xmlFile:getValue("config#tyreWitherLevelIndex", self.tyreWitherLevelIndex)
     self.tyrePaintPaletteIndex = xmlFile:getValue("config#tyrePaintPaletteIndex", self.tyrePaintPaletteIndex)
     self.sweepSampleCountIndex = xmlFile:getValue("config#sweepSampleCountIndex", self.sweepSampleCountIndex)
+    self.wheelSensitivityIndex = xmlFile:getValue("config#wheelSensitivityIndex", self.wheelSensitivityIndex)
+    self.verboseLoggingIndex = xmlFile:getValue("config#verboseLoggingIndex", self.verboseLoggingIndex)
 
     xmlFile:delete()
 end
@@ -64,6 +70,8 @@ function IWConfig:save()
     xmlFile:setValue("config#tyreWitherLevelIndex", self.tyreWitherLevelIndex)
     xmlFile:setValue("config#tyrePaintPaletteIndex", self.tyrePaintPaletteIndex)
     xmlFile:setValue("config#sweepSampleCountIndex", self.sweepSampleCountIndex)
+    xmlFile:setValue("config#wheelSensitivityIndex", self.wheelSensitivityIndex)
+    xmlFile:setValue("config#verboseLoggingIndex", self.verboseLoggingIndex)
     xmlFile:save()
     xmlFile:delete()
 end
@@ -106,4 +114,24 @@ function IWConfig:cycleSweepSampleCountIndex(optionCount)
     self.sweepSampleCountIndex = (self.sweepSampleCountIndex % optionCount) + 1
     self:save()
     return self.sweepSampleCountIndex
+end
+
+function IWConfig:getWheelSensitivityIndex()
+    return self.wheelSensitivityIndex
+end
+
+function IWConfig:cycleWheelSensitivityIndex(optionCount)
+    self.wheelSensitivityIndex = (self.wheelSensitivityIndex % optionCount) + 1
+    self:save()
+    return self.wheelSensitivityIndex
+end
+
+function IWConfig:getVerboseLoggingIndex()
+    return self.verboseLoggingIndex
+end
+
+function IWConfig:cycleVerboseLoggingIndex(optionCount)
+    self.verboseLoggingIndex = (self.verboseLoggingIndex % optionCount) + 1
+    self:save()
+    return self.verboseLoggingIndex
 end
