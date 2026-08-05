@@ -2073,6 +2073,26 @@ function ImmersiveWeathering:getSeederTerrainLayerId()
     return self:getTerrainLayerIdByName(textureName or "GRASS")
 end
 
+-- Public: whether a real sowing machine currently has grass/meadow seed
+-- loaded, not some other crop (wheat, barley, ...). Confirmed real via
+-- base game source (dataS/scripts/vehicles/specializations/Roller.lua's
+-- own grassFruitTypes = {FruitType.GRASS, FruitType.MEADOW}) - the same
+-- two fruit types the base game itself treats as "grass" for its own
+-- roller mechanic, not a guess. spec.seeds[spec.currentSeed] is the real
+-- internal field (confirmed via SowingMachine.lua's own
+-- getSowingMachineSeedFillTypeIndex, which reads the exact same path) -
+-- fails closed (false) if anything's missing, same reasoning as
+-- isConditionTrue for weather conditions.
+function ImmersiveWeathering:isSeederLoadedWithGrass(vehicle)
+    local spec = vehicle.spec_sowingMachine
+    if spec == nil or spec.seeds == nil or spec.currentSeed == nil then
+        return false
+    end
+
+    local fruitTypeIndex = spec.seeds[spec.currentSeed]
+    return fruitTypeIndex == FruitType.GRASS or fruitTypeIndex == FruitType.MEADOW
+end
+
 -- Ground-texture paint, a different system entirely from the deco density
 -- maps everything else here writes to - none of these natives show up in
 -- scriptBinding.xml, confirmed instead against TerraFarm's actual working
@@ -2436,8 +2456,16 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
             -- case, since there's no meaningful activation state to gate
             -- on at all: you're either pushing it (wheels grounded,
             -- already required above) or you're not.
+            --
+            -- isWorking alone isn't enough for a real sowing machine
+            -- though - it fires for ANY loaded seed, so a wheat drill
+            -- driven over bare ground for testing got the exact same
+            -- grass treatment as an actual pasture seeder. Real hand
+            -- tools skip this check entirely - they're dedicated grass
+            -- tools with no crop selection to get wrong.
             local seederIsOn = seederVehicle.spec_pushHandTool ~= nil
-                or seederVehicle.spec_sowingMachine.isWorking == true
+                or (seederVehicle.spec_sowingMachine.isWorking == true
+                    and self:isSeederLoadedWithGrass(seederVehicle))
 
             local layerId = nil
             if seederIsOn then

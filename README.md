@@ -35,8 +35,10 @@ are unconditionally excluded - player driving only, by design.
 **Seeders sow grass on meadows** - this mod is trying to give you the 
 most immersive way possible to manage the changes we're doing. So, I'm trying
 to avoid forcing you to use the construction menu to undo damaged meadows, 
-instead just drive a seeder (turned on and lowered, as you would on a field)
-over the meadow. (Hand tool is supported too).
+instead just drive a seeder loaded with grass/pasture seed (turned on and
+lowered, as you would on a field) over the meadow - a seeder loaded with
+any other crop (wheat, barley, ...) is left alone, it's not treated as
+"sow grass" just because it's active. (Hand tool is supported too).
 It will repaint dirt/gravel to grass and seed short grass (or what you 
 configure in the maps integration xml, see below).
 It never touches ground where something's already growing - this only fills
