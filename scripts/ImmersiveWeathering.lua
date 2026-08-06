@@ -1043,6 +1043,17 @@ function ImmersiveWeathering:dumpConfigValidity()
         )
     end
 
+    local allowedFruitTypeParts = {}
+    for fruitTypeIndex in pairs(self:getAllowedSeederFruitTypeIndices()) do
+        local fruitTypeDesc = g_fruitTypeManager:getFruitTypeByIndex(fruitTypeIndex)
+        table.insert(allowedFruitTypeParts, fruitTypeDesc ~= nil and fruitTypeDesc.name or tostring(fruitTypeIndex))
+    end
+    debugPrintf(
+        "[ConfigDump] === seederFruitTypes: %s (%s) ===",
+        table.concat(allowedFruitTypeParts, " "),
+        palette.seederFruitTypeNames ~= nil and "declared in iw.xml" or "built-in default"
+    )
+
     local groundEntryCount = 0
     for _ in pairs(palette.groundEntriesByName) do
         groundEntryCount = groundEntryCount + 1
@@ -2073,24 +2084,54 @@ function ImmersiveWeathering:getSeederTerrainLayerId()
     return self:getTerrainLayerIdByName(textureName or "GRASS")
 end
 
--- Public: whether a real sowing machine currently has grass/meadow seed
--- loaded, not some other crop (wheat, barley, ...). Confirmed real via
--- base game source (dataS/scripts/vehicles/specializations/Roller.lua's
--- own grassFruitTypes = {FruitType.GRASS, FruitType.MEADOW}) - the same
--- two fruit types the base game itself treats as "grass" for its own
--- roller mechanic, not a guess. spec.seeds[spec.currentSeed] is the real
--- internal field (confirmed via SowingMachine.lua's own
--- getSowingMachineSeedFillTypeIndex, which reads the exact same path) -
--- fails closed (false) if anything's missing, same reasoning as
--- isConditionTrue for weather conditions.
-function ImmersiveWeathering:isSeederLoadedWithGrass(vehicle)
+-- Public: the set of real fruit type indices a sowing machine must have
+-- loaded to count as "sowing grass" here at all - a map author's own
+-- <seederFruitTypes> list in iw.xml if declared, or the hardcoded
+-- MEADOW/GRASS default otherwise (today's behavior, confirmed real via
+-- Roller.lua's own grassFruitTypes = {FruitType.GRASS, FruitType.MEADOW},
+-- the same two fruit types the base game itself treats as "grass" for
+-- its own roller mechanic - unchanged for every map that doesn't declare
+-- its own list, so this can never silently break an existing iw.xml).
+-- Resolved and cached once, not per-call - fruit type registration
+-- doesn't change mid-session. An unresolvable declared name is logged
+-- and skipped, not a hard error - one typo shouldn't take the whole list
+-- down.
+function ImmersiveWeathering:getAllowedSeederFruitTypeIndices()
+    if self.allowedSeederFruitTypeIndices ~= nil then
+        return self.allowedSeederFruitTypeIndices
+    end
+
+    local names = self.foliagePalette.seederFruitTypeNames or { "MEADOW", "GRASS" }
+    local indices = {}
+
+    for _, name in ipairs(names) do
+        local fruitTypeDesc = g_fruitTypeManager:getFruitTypeByName(name)
+        if fruitTypeDesc ~= nil then
+            indices[fruitTypeDesc.index] = true
+        else
+            debugPrintf("[Seeder] iw.xml declared unknown fruit type '%s' - ignored", name)
+        end
+    end
+
+    self.allowedSeederFruitTypeIndices = indices
+    return indices
+end
+
+-- Public: whether a real sowing machine currently has one of the
+-- allowed seeder fruit types loaded (see
+-- getAllowedSeederFruitTypeIndices), not some other crop.
+-- spec.seeds[spec.currentSeed] is the real internal field (confirmed via
+-- SowingMachine.lua's own getSowingMachineSeedFillTypeIndex, which reads
+-- the exact same path) - fails closed (false) if anything's missing,
+-- same reasoning as isConditionTrue for weather conditions.
+function ImmersiveWeathering:isSeederLoadedWithAllowedFruitType(vehicle)
     local spec = vehicle.spec_sowingMachine
     if spec == nil or spec.seeds == nil or spec.currentSeed == nil then
         return false
     end
 
     local fruitTypeIndex = spec.seeds[spec.currentSeed]
-    return fruitTypeIndex == FruitType.GRASS or fruitTypeIndex == FruitType.MEADOW
+    return self:getAllowedSeederFruitTypeIndices()[fruitTypeIndex] == true
 end
 
 -- Ground-texture paint, a different system entirely from the deco density
@@ -2465,7 +2506,7 @@ function ImmersiveWeathering:processWheelContact(wheelDestruction, wheelCount)
             -- tools with no crop selection to get wrong.
             local seederIsOn = seederVehicle.spec_pushHandTool ~= nil
                 or (seederVehicle.spec_sowingMachine.isWorking == true
-                    and self:isSeederLoadedWithGrass(seederVehicle))
+                    and self:isSeederLoadedWithAllowedFruitType(seederVehicle))
 
             local layerId = nil
             if seederIsOn then

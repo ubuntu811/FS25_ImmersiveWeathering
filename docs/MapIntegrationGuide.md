@@ -182,7 +182,31 @@ Field-by-field:
 | `<mutatesTo>` | `chance` | Independent 0-100 roll, only reachable if `condition` passes |
 | `<mutatesTo>` | `condition` | Optional. Only `"isRaining"` exists today (see [Weather.md](https://github.com/ubuntu811/FS25_whatAmILookingAt/blob/main/docs/engine-api/Weather.md)). Absent = unconditional. Unrecognized names always fail closed |
 
-## 4. Test before trusting it
+## 4. `iw.xml`: which crops count as "sowing grass"
+
+Same file, top-level `<seederFruitTypes>` - which real fruit types a real
+sowing machine must have loaded for its seeder pass to count at all (paint
+the `groundMapping` `seeder="true"` entry, plant the `foliageMapping`
+`seeder="true"` entry). A wheat drill loaded with wheat is never treated
+as "sowing grass" just because it's active - only a genuine match counts.
+
+```xml
+<seederFruitTypes>
+    <fruitType name="MEADOW" />
+    <fruitType name="GRASS" />
+</seederFruitTypes>
+```
+
+**Absent entirely** (no `<seederFruitTypes>` element at all) falls back to
+the hardcoded `MEADOW`/`GRASS` default - today's behavior, unchanged for
+every existing `iw.xml` that predates this. **Present but empty**
+(`<seederFruitTypes></seederFruitTypes>`) means no seeder pass ever
+counts, a genuine map-author choice, not the same as "not declared."
+`name` must be a real fruit type name the game recognizes (`WHEAT`,
+`SUNFLOWER`, ... same names used in vehicle/crop XMLs) - an unresolvable
+name is logged and skipped, not a hard error.
+
+## 5. Test before trusting it
 
 1. `check_foliage_sync.py` (step 1) - catches the three real bug categories
    it's designed for, in seconds, before you ever load the game.

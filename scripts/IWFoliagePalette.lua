@@ -81,6 +81,15 @@ function IWFoliagePalette.new()
     -- groundMapping declared", which callers use as the signal to fall
     -- back to the hardcoded TYRE_PAINT_PALETTES behavior.
     self.groundEntriesByName = {}
+    -- <seederFruitTypes> - which real fruit types a sowing machine must
+    -- have loaded to count as "sowing grass" here at all. nil (not the
+    -- same as an empty table) means "not declared in iw.xml", which
+    -- ImmersiveWeathering:getAllowedSeederFruitTypeIndices() uses as the
+    -- signal to fall back to the hardcoded MEADOW/GRASS default -
+    -- distinct from a real, explicitly empty <seederFruitTypes></...>,
+    -- which means "no seeder passes ever count", a genuine map-author
+    -- choice, not an accident.
+    self.seederFruitTypeNames = nil
     self:load()
     return self
 end
@@ -285,6 +294,35 @@ function IWFoliagePalette:load()
         end
 
         groundIndex = groundIndex + 1
+    end
+
+    -- <seederFruitTypes><fruitType name="X" />...</seederFruitTypes> -
+    -- checked via hasProperty on the PARENT element, not just "did we
+    -- find any children", so a real but empty declaration is
+    -- distinguishable from "not declared at all" (see the field's own
+    -- comment in .new()).
+    if xmlFile:hasProperty("iwConfig.seederFruitTypes") then
+        local seederFruitTypeNames = {}
+        local seederFruitTypeIndex = 0
+
+        while true do
+            local fruitTypeKey = string.format("iwConfig.seederFruitTypes.fruitType(%d)", seederFruitTypeIndex)
+
+            if not xmlFile:hasProperty(fruitTypeKey) then
+                break
+            end
+
+            local fruitTypeName = xmlFile:getString(fruitTypeKey .. "#name")
+
+            if fruitTypeName ~= nil then
+                table.insert(seederFruitTypeNames, fruitTypeName)
+            end
+
+            seederFruitTypeIndex = seederFruitTypeIndex + 1
+        end
+
+        self.seederFruitTypeNames = seederFruitTypeNames
+        debugPrintf("loaded %d seeder fruit type(s) from %s", #seederFruitTypeNames, iwXMLFilename)
     end
 
     xmlFile:delete()
