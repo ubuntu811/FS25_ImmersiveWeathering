@@ -10,7 +10,7 @@ It's two files:
 - **`map.xml`** (your map already has this) - declares which foliage layers
   exist and which of their states are writable at all. IW can only ever
   touch what's declared here.
-- **`iw.xml`** (optional, sibling file you add) - tells IW *what to do* with
+- **`iw-map.xml`** (optional, sibling file you add) - tells IW *what to do* with
   what `map.xml` made available: which layers/states to pick from, how
   likely, whether they grow/spread/mutate, and what ground texture to paint
   underneath.
@@ -22,7 +22,7 @@ this guide only states the rule and what to do about it.
 
 ## 0. Nothing to configure yet? Just install it
 
-If you're not writing an `iw.xml`, skip straight to playing - IW already
+If you're not writing an `iw-map.xml`, skip straight to playing - IW already
 works. The rest of this guide is for maps that want their own palette.
 
 ## 1. `map.xml`: declare what's writable
@@ -65,13 +65,13 @@ debug menu (`Shift+L` → "Dump terrain layers") prints every real layer name
 this map declares - to `log.txt`, not on screen - don't guess or assume
 shared across maps.
 
-## 2. `iw.xml`: foliage palette
+## 2. `iw-map.xml`: foliage palette
 
 Sibling file to `map.xml`. `<foliageMapping>` picks which declared layer/
 state gets placed, how often, and what it does over time.
 
 `grassShort` is IW's own built-in universal fallback - it's what runs with
-zero `iw.xml` at all (step 0), and it's still there once you add one: your
+zero `iw-map.xml` at all (step 0), and it's still there once you add one: your
 entries never have to add up to 100, whatever's left over just falls back
 to it. Nothing to declare for it yourself.
 
@@ -91,7 +91,7 @@ to it. Nothing to declare for it yourself.
 ```
 
 For a complete real example (including a specific-state override and
-cross-entry `mutatesTo` chains), see `maps/iw.xml` in the
+cross-entry `mutatesTo` chains), see `maps/iw-map.xml` in the
 `FS25_Estancia_Lapacho_orange` map repo this palette was built against
 (local dev repo, not published anywhere yet).
 
@@ -124,14 +124,14 @@ time, not just once:
 
 1. **Proves the `map.xml` wiring is actually correct.** Fill an area and
    look - nothing showing up for a layer you just declared means something
-   upstream (step 1) is broken, before you waste time debugging `iw.xml`
+   upstream (step 1) is broken, before you waste time debugging `iw-map.xml`
    itself.
 2. **Tells you what's actually planted where**, right now, on the real map
    - useful any time you want to find "that one specific flower" for a
    `<mutatesTo>` target or a `groundMapping` `<foliage>` reference, instead
    of guessing a name and hoping it's right.
 
-## 3. `iw.xml`: ground texture palette
+## 3. `iw-map.xml`: ground texture palette
 
 Same file, separate `<groundMapping>` section - what ground *texture*
 wither paints (not foliage), and what it can mutate into (e.g. mud when
@@ -182,7 +182,7 @@ Field-by-field:
 | `<mutatesTo>` | `chance` | Independent 0-100 roll, only reachable if `condition` passes |
 | `<mutatesTo>` | `condition` | Optional. Only `"isRaining"` exists today (see [Weather.md](https://github.com/ubuntu811/FS25_whatAmILookingAt/blob/main/docs/engine-api/Weather.md)). Absent = unconditional. Unrecognized names always fail closed |
 
-## 4. `iw.xml`: which crops count as "sowing grass"
+## 4. `iw-map.xml`: which crops count as "sowing grass"
 
 Same file, top-level `<seederFruitTypes>` - which real fruit types a real
 sowing machine must have loaded for its seeder pass to count at all (paint
@@ -199,7 +199,7 @@ as "sowing grass" just because it's active - only a genuine match counts.
 
 **Absent entirely** (no `<seederFruitTypes>` element at all) falls back to
 the hardcoded `MEADOW`/`GRASS` default - today's behavior, unchanged for
-every existing `iw.xml` that predates this. **Present but empty**
+every existing `iw-map.xml` that predates this. **Present but empty**
 (`<seederFruitTypes></seederFruitTypes>`) means no seeder pass ever
 counts, a genuine map-author choice, not the same as "not declared."
 `name` must be a real fruit type name the game recognizes (`WHEAT`,
@@ -210,8 +210,8 @@ name is logged and skipped, not a hard error.
 
 1. `check_foliage_sync.py` (step 1) - catches the three real bug categories
    it's designed for, in seconds, before you ever load the game.
-2. In-game: IW's own debug menu (`Shift+Ctrl+M`) → "Dump iw.xml config
-   validity" - one line per `iw.xml` entry, every reference it makes (a
+2. In-game: IW's own debug menu (`Shift+Ctrl+M`) → "Dump iw-map.xml config
+   validity" - one line per `iw-map.xml` entry, every reference it makes (a
    texture layer name, a foliage layer/state, a cross-entry `mutatesTo`
    target) marked `OK`/`MISSING` against what's actually loaded right now.
    Catches a typo'd layer name or a `mutatesTo` pointing at a name that

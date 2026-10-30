@@ -23,6 +23,7 @@
         <sourceFile filename="scripts/IWConfig.lua" />
         <sourceFile filename="scripts/IWSettingsUI.lua" />
         <sourceFile filename="scripts/IWFoliagePalette.lua" />
+        <sourceFile filename="scripts/IWTrackedPatches.lua" />
         <sourceFile filename="scripts/ImmersiveWeathering.lua" />
     </extraSourceFiles>
 

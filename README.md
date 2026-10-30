@@ -62,9 +62,9 @@ managed by the in game config, we're not touching that.
 Also, only ground that already reads as dirt, gravel, sand, or grass is
 touched at all - a fixed allowlist in the Lua
 (`WEATHERABLE_MATERIALS`/`GRASS_MATERIAL_ONLY`/`TERRAIN_REGROWTH_TARGETS`
-in `scripts/ImmersiveWeathering.lua`), not something `iw.xml` extends.
+in `scripts/ImmersiveWeathering.lua`), not something `iw-map.xml` extends.
 So e.g. concrete reads as its own separate material and is never touched,
-no matter what `iw.xml` declares - `iw.xml` only customizes *what*
+no matter what `iw-map.xml` declares - `iw-map.xml` only customizes *what*
 happens on ground IW already recognizes, it can't add new material types
 to touch.
 Anything underneath map objects (buildings, roads etc) will not be touched either. 
@@ -115,7 +115,7 @@ IW works with zero setup on any map (a hardcoded fallback). For a map
 author who wants real, varied foliage and ground-texture behavior instead
 of the default, see
 [docs/MapIntegrationGuide.md](docs/MapIntegrationGuide.md) - practical,
-in-order steps for adapting `map.xml` and writing an `iw.xml`, plus the
+in-order steps for adapting `map.xml` and writing an `iw-map.xml`, plus the
 real bugs/gotchas hit building this feature.
 
 ## Engine API notes

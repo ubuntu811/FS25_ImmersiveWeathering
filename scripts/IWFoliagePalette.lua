@@ -1,6 +1,6 @@
--- Loads an optional per-map foliage palette (iw.xml, sibling to the
+-- Loads an optional per-map foliage palette (iw-map.xml, sibling to the
 -- current map's own map.xml) - see the comment block at the top of
--- FS25_Estancia_Lapacho_orange's maps/iw.xml for the real, worked schema.
+-- FS25_Estancia_Lapacho_orange's maps/iw-map.xml for the real, worked schema.
 --
 -- Deliberately schema-less XMLFile.load (not XMLFile.create/loadIfExists +
 -- XMLSchema like IWConfig.lua) - this file is read-only, map-author-
@@ -41,7 +41,7 @@ end
 -- only ever called with "decoFoliage", never "grassShort" itself. This
 -- entry is only ever used as *what to write* (pickFreshEntry's remainder,
 -- getSeederEntry's fallback), never looked up again afterward. The real
--- "stuck" entry to fix is decoFoliage's own entry in iw.xml, not this one.
+-- "stuck" entry to fix is decoFoliage's own entry in iw-map.xml, not this one.
 local GRASS_SHORT_FALLBACK_ENTRY = {
     name = "grassShort",
     literalName = true,
@@ -54,13 +54,16 @@ local GRASS_SHORT_FALLBACK_ENTRY = {
     mutatesTo = {},
     seeder = true,
     seederLevel = 0,
+    trackPatch = false,
+    trackedSpreadChance = 0,
+    trackedRejuvenateChance = 0,
 }
 
 -- No auto-detected "smarter" fallback (a meadow-if-available variant was
--- tried and reverted) - if iw.xml is present, everything that happens on
+-- tried and reverted) - if iw-map.xml is present, everything that happens on
 -- the map should come from what it declares, no guessing layered on top
 -- by our own code, even for the remainder slot. grassShort is the one
--- fallback used everywhere, uniformly, whether there's no iw.xml at all
+-- fallback used everywhere, uniformly, whether there's no iw-map.xml at all
 -- or a loaded palette's weights just don't sum to 100%.
 function IWFoliagePalette.new()
     local self = setmetatable({}, IWFoliagePalette_mt)
@@ -77,13 +80,13 @@ function IWFoliagePalette.new()
     -- checks first.
     self.specificEntriesByNameAndState = {}
     -- <groundMapping> entries (ground TEXTURE, a separate namespace from
-    -- foliage entries above) - empty by default, meaning "no iw.xml
+    -- foliage entries above) - empty by default, meaning "no iw-map.xml
     -- groundMapping declared", which callers use as the signal to fall
     -- back to the hardcoded TYRE_PAINT_PALETTES behavior.
     self.groundEntriesByName = {}
     -- <seederFruitTypes> - which real fruit types a sowing machine must
     -- have loaded to count as "sowing grass" here at all. nil (not the
-    -- same as an empty table) means "not declared in iw.xml", which
+    -- same as an empty table) means "not declared in iw-map.xml", which
     -- ImmersiveWeathering:getAllowedSeederFruitTypeIndices() uses as the
     -- signal to fall back to the hardcoded MEADOW/GRASS default -
     -- distinct from a real, explicitly empty <seederFruitTypes></...>,
@@ -113,12 +116,26 @@ function IWFoliagePalette:load()
     -- get an actually-resolvable absolute path, confirmed by TerraFarm's
     -- own getMapDirectoryFilename doing exactly this. Without it, every
     -- fresh placement silently fell back to the built-in grassShort-only
-    -- default, palette never actually loaded despite iw.xml existing.
-    local iwXMLFilename = g_currentMission.baseDirectory .. Utils.getDirectory(mapXMLFilename) .. "iw.xml"
+    -- default, palette never actually loaded despite iw-map.xml existing.
+    --
+    -- Second real bug found live (2026-08-15): baseDirectory doesn't
+    -- reliably end in a separator - a loose/unzipped dev-deployed mod
+    -- folder (this project's own deploy.sh target) produced
+    -- ".../FS25_Estancia_Lapacho_orangemaps/iw-map.xml" (no separator at
+    -- all between the mod folder name and "maps/"), confirmed directly
+    -- from the actual "Failed to open xml file" error text. Strip any
+    -- trailing slash baseDirectory DOES have, then always join with
+    -- exactly one - safe regardless of which form this particular
+    -- deployment (loose folder vs zipped mod) provides.
+    local baseDirectory = g_currentMission.baseDirectory
+    if baseDirectory:sub(-1) == "/" or baseDirectory:sub(-1) == "\\" then
+        baseDirectory = baseDirectory:sub(1, -2)
+    end
+    local iwXMLFilename = baseDirectory .. "/" .. Utils.getDirectory(mapXMLFilename) .. "iw-map.xml"
     local xmlFile = XMLFile.load("IWFoliagePalette", iwXMLFilename)
 
     if xmlFile == nil then
-        debugPrintf("no iw.xml at %s - using default (%s only)", iwXMLFilename, self.fallbackEntry.name)
+        debugPrintf("no iw-map.xml at %s - using default (%s only)", iwXMLFilename, self.fallbackEntry.name)
         return
     end
 
@@ -168,6 +185,27 @@ function IWFoliagePalette:load()
                 mutateChance = xmlFile:getInt(key .. "#mutateChance", 0),
                 seeder = xmlFile:getString(key .. "#seeder", "false") == "true",
                 seederLevel = xmlFile:getInt(key .. "#seederLevel", 0),
+                -- trackPatch: opt this entry into IWTrackedPatches - any
+                -- instance the sweep encounters (discovered OR freshly
+                -- placed/spread by IW itself) gets its exact coordinate
+                -- registered in the savegame's iw-save.xml and processed
+                -- deterministically every sweep from then on, instead of
+                -- relying on random sampling to ever land near it again
+                -- (the actual motivation: a single small patch can go many
+                -- sweeps without ever being sampled, no matter how good
+                -- detection is once it's found - see
+                -- ImmersiveWeathering:processTrackedPatches). Two separate
+                -- chances, deliberately NOT reusing chance/clusters above -
+                -- tracked processing is a different life-cycle event
+                -- (stage > stageMax = gone past what this entry curates,
+                -- "rotten", not a normal growth/spread roll) and needs its
+                -- own tunable rates so a map author can keep a species from
+                -- taking over (trackedSpreadChance low) while still
+                -- guaranteeing it doesn't stay permanently rotten
+                -- (trackedRejuvenateChance high, default ~100).
+                trackPatch = xmlFile:getString(key .. "#trackPatch", "false") == "true",
+                trackedSpreadChance = xmlFile:getInt(key .. "#trackedSpreadChance", 10),
+                trackedRejuvenateChance = xmlFile:getInt(key .. "#trackedRejuvenateChance", 100),
                 mutatesTo = {},
             }
 
@@ -204,8 +242,8 @@ function IWFoliagePalette:load()
     -- <groundMapping> - a completely separate section/namespace from
     -- <foliageMapping> above (ground TEXTURE, not foliage). Entry names
     -- ("dirt"/"gravel") match the player's existing Settings-page toggle,
-    -- not anything in entriesByName. Absent entirely (older iw.xml, or no
-    -- iw.xml at all) leaves groundEntriesByName empty - callers fall back
+    -- not anything in entriesByName. Absent entirely (older iw-map.xml, or no
+    -- iw-map.xml at all) leaves groundEntriesByName empty - callers fall back
     -- to the hardcoded TYRE_PAINT_PALETTES behavior in that case, same
     -- backward-compat shape as the foliage fallback above.
     local groundEntriesByName = {}
@@ -502,7 +540,7 @@ function IWFoliagePalette:getSeederEntry()
 end
 
 -- Public: find a <groundMapping> entry by name ("dirt"/"gravel", matching
--- the player's Settings-page toggle) - nil if no iw.xml groundMapping
+-- the player's Settings-page toggle) - nil if no iw-map.xml groundMapping
 -- declared it, which callers use as the signal to fall back to the
 -- hardcoded TYRE_PAINT_PALETTES behavior.
 function IWFoliagePalette:findGroundEntry(name)
@@ -579,7 +617,7 @@ end
 -- docs/engine-api/Weather.md. The base game itself has no simple
 -- isRaining() flag, it's this exact three-part formula. Unrecognized
 -- condition names fail closed (return false) rather than silently
--- passing - a typo'd condition in iw.xml should mean "never fires", not
+-- passing - a typo'd condition in iw-map.xml should mean "never fires", not
 -- "always fires".
 local function isConditionTrue(conditionName)
     if conditionName == "isRaining" then

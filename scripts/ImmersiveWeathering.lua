@@ -57,9 +57,9 @@ local TYRE_PAINT_PALETTES = {
 local TYRE_PAINT_PALETTE_DEFAULT_INDEX = 1
 -- i18n keys, one per TYRE_PAINT_PALETTES entry, in the same order.
 local TYRE_PAINT_PALETTE_LABELS = {"iw_material_dirt", "iw_material_gravel"}
--- iw.xml <groundMapping> entry names, same order/index as
+-- iw-map.xml <groundMapping> entry names, same order/index as
 -- TYRE_PAINT_PALETTES/TYRE_PAINT_PALETTE_LABELS above - the Settings-page
--- toggle itself stays fixed at these two options; iw.xml supplies their
+-- toggle itself stays fixed at these two options; iw-map.xml supplies their
 -- content (which real texture layers, what weights, foliage chance), not
 -- the toggle's own option count.
 local TYRE_PAINT_PALETTE_NAMES = {"dirt", "gravel"}
@@ -161,7 +161,7 @@ local WEATHERING_COLLISION_FLAG_NAMES = {
 
 -- TEST_RIG_GRID_LAYERS/MAX_STATE/STATES/SPACING and placeFoliageTestRig
 -- itself moved to WAILA (WailaDebugTools) - pure world/map investigation,
--- never read or wrote iw.xml/the foliage palette.
+-- never read or wrote iw-map.xml/the foliage palette.
 local AREA_FILL_SIZE = 3.0
 local AREA_FILL_STEP = 0.5
 
@@ -193,6 +193,22 @@ local NEIGHBOR_OFFSETS = {
     {-1,  1}, {0,  1}, {1,  1},
 }
 
+-- Detection kernel for getFoliageNameNearby - deliberately much tighter
+-- than NEIGHBOR_STEP/NEIGHBOR_OFFSETS above, which are sized for
+-- claiming a *new* neighboring spot 1m away during spread, not for
+-- reliably re-finding a stamp that's already there. placeFoliage's own
+-- quad (halfSize 0.35-0.7, so ~0.7-1.4m across) is small enough that a
+-- single exact-point density read can land in the gap between painted
+-- pixels inside it (confirmed via WAILA) - so a sweep sample reading
+-- "empty" isn't trustworthy on its own until a small ring around it is
+-- also checked.
+local FOLIAGE_DETECT_RADIUS = 0.4
+local FOLIAGE_DETECT_OFFSETS = {
+    {-1, -1}, {0, -1}, {1, -1},
+    {-1,  0},          {1,  0},
+    {-1,  1}, {0,  1}, {1,  1},
+}
+
 -- Terrain texture's own regrowth (one layer down from foliage) - a
 -- sampled grass-material spot has a chance to reclaim one dirt/gravel
 -- neighbor back to grass. Not folded into the foliage palette - it's
@@ -215,7 +231,41 @@ BaseMission.loadMap = Utils.overwrittenFunction(
     BaseMission.loadMap,
     function(mission, superFunc, filename, ...)
         ImmersiveWeathering.mapI3dFilename = filename
-        return superFunc(mission, filename, ...)
+        local success = superFunc(mission, filename, ...)
+
+        -- iw-save.xml load is deferred to CURRENT_MISSION_START, same
+        -- proven-safe pattern FS25_Hammer's own sandboxtools.xml load
+        -- uses (a physics/density-map query fired directly inside
+        -- loadMap hung there once, confirmed the hard way in that mod -
+        -- this particular load has no physics query of its own, but
+        -- consistency with the pattern that's actually confirmed safe
+        -- costs nothing). self.trackedPatches itself is constructed
+        -- earlier in ImmersiveWeathering:loadMap (the mod's own
+        -- addModEventListener callback, unrelated to this
+        -- BaseMission.loadMap override) - only the disk read is deferred.
+        g_messageCenter:subscribeOneshot(MessageType.CURRENT_MISSION_START, function()
+            if ImmersiveWeathering.trackedPatches ~= nil then
+                ImmersiveWeathering.trackedPatches:load()
+            end
+        end)
+
+        -- FSCareerMissionInfo.saveToXMLFile hook - same real, confirmed-
+        -- necessary pattern FS25_Hammer uses for sandboxtools.xml
+        -- (registration-time writes alone didn't survive an actual Save
+        -- Game pass). Installed here, not at file-scope, for the same
+        -- reason Hammer's own comment gives: FSCareerMissionInfo isn't a
+        -- boot-time global. Guarded so a second loadMap (loading a
+        -- different save without restarting) doesn't stack wrappers.
+        if not ImmersiveWeathering.saveHookInstalled then
+            FSCareerMissionInfo.saveToXMLFile = Utils.appendedFunction(FSCareerMissionInfo.saveToXMLFile, function()
+                if ImmersiveWeathering.trackedPatches ~= nil then
+                    ImmersiveWeathering.trackedPatches:save()
+                end
+            end)
+            ImmersiveWeathering.saveHookInstalled = true
+        end
+
+        return success
     end
 )
 
@@ -244,9 +294,14 @@ function ImmersiveWeathering:loadMap(_)
         VERBOSE_LOGGING_LABELS
     )
 
-    -- Loads the current map's own iw.xml if present (sibling to map.xml),
+    -- Loads the current map's own iw-map.xml if present (sibling to map.xml),
     -- falls back to the built-in single-grassShort palette otherwise.
     self.foliagePalette = IWFoliagePalette.new()
+
+    -- Constructed here (so self.trackedPatches exists and is safe to
+    -- reference immediately), but its own disk read is deferred - see
+    -- the BaseMission.loadMap override above for why.
+    self.trackedPatches = IWTrackedPatches.new()
 
     self:refreshTyreEffectsLabel()
 
@@ -638,7 +693,7 @@ function ImmersiveWeathering:onWeatherCrosshairPressed(
 end
 
 -- placeTerrainLayerTestRow, dumpDensityProbe, and dumpTerrainLayers moved
--- to WAILA (WailaDebugTools) - none of them read or wrote iw.xml/the
+-- to WAILA (WailaDebugTools) - none of them read or wrote iw-map.xml/the
 -- foliage palette, pure world/engine investigation.
 
 -- The power-tools overlay has no room to show current values, only static
@@ -709,17 +764,17 @@ end
 function ImmersiveWeathering:showDebugMenu()
     -- Place foliage test rig / dump terrain layers / paint layer test row
     -- / density probe all moved to WAILA (WailaDebugTools) - none of them
-    -- ever read or wrote iw.xml/the foliage palette, pure world/engine
+    -- ever read or wrote iw-map.xml/the foliage palette, pure world/engine
     -- investigation that only lived here because the raycast/paint
     -- helpers were already at hand. Fill area is the one exception kept
     -- here for now - unclear yet whether its gravel-not-grassShort
     -- behavior is a real bug worth tracing before deciding where it
     -- belongs. Dump config validity is the opposite of the tools that
-    -- left - it's about iw.xml's own content, not the world, so it
+    -- left - it's about iw-map.xml's own content, not the world, so it
     -- belongs here permanently.
     local actions = {
         { "Fill area (debug)", self.placeFoliageAreaFill },
-        { "Dump iw.xml config validity", self.dumpConfigValidity },
+        { "Dump iw-map.xml config validity", self.dumpConfigValidity },
     }
 
     local options = {}
@@ -1005,14 +1060,14 @@ function ImmersiveWeathering:placeFoliageAreaFill()
         AREA_FILL_SIZE, AREA_FILL_SIZE, hx, hz, placed, ((AREA_FILL_SIZE / AREA_FILL_STEP) + 1) ^ 2)
 end
 
--- Dumps the loaded iw.xml palette's own validity against the real engine -
+-- Dumps the loaded iw-map.xml palette's own validity against the real engine -
 -- one line per entry, every reference it makes (a texture layer name, a
 -- foliage layer/state, a cross-entry mutatesTo target) marked OK/MISSING.
--- Squarely IW's own domain (validating iw.xml's own content, not world/
+-- Squarely IW's own domain (validating iw-map.xml's own content, not world/
 -- terrain reverse engineering), unlike the tools that moved to WAILA -
 -- this is why IW keeps its own debug menu instead of folding entirely
 -- into WAILA's. Complements check_foliage_sync.py (map.xml vs real I3D/
--- descriptors, no game load needed) with the other half: iw.xml vs what's
+-- descriptors, no game load needed) with the other half: iw-map.xml vs what's
 -- actually loaded and resolvable right now, in this running game.
 function ImmersiveWeathering:dumpConfigValidity()
     local palette = self.foliagePalette
@@ -1051,7 +1106,7 @@ function ImmersiveWeathering:dumpConfigValidity()
     debugPrintf(
         "[ConfigDump] === seederFruitTypes: %s (%s) ===",
         table.concat(allowedFruitTypeParts, " "),
-        palette.seederFruitTypeNames ~= nil and "declared in iw.xml" or "built-in default"
+        palette.seederFruitTypeNames ~= nil and "declared in iw-map.xml" or "built-in default"
     )
 
     local groundEntryCount = 0
@@ -1096,7 +1151,7 @@ function ImmersiveWeathering:dumpConfigValidity()
 end
 
 -- placeFoliageTestRig moved to WAILA (WailaDebugTools) - pure world/map
--- investigation, never read or wrote iw.xml/the foliage palette.
+-- investigation, never read or wrote iw-map.xml/the foliage palette.
 
 function ImmersiveWeathering:onDebugFieldRaycastCallback(
     hitObjectId,
@@ -1225,7 +1280,6 @@ function ImmersiveWeathering:placeFoliage(x, z, decoName)
 
     foliageSystem:applyDecoFoliage(decoName, x0, z0, x1, z1, x2, z2)
 
-    debugPrint(string.format("%s to (%.2f %.2f)", decoName, x, z))
     return true
 end
 
@@ -1344,6 +1398,41 @@ function ImmersiveWeathering:getFoliageNameAt(x, z)
     return nil
 end
 
+-- Only called when the direct exact-point read already came back nil -
+-- the common case (genuinely clear ground, or a read that landed dead
+-- center on a stamp) needs no extra density-map reads at all. This only
+-- pays for itself on the specific "might have missed a small existing
+-- stamp" case, which is exactly when it's worth a handful of extra
+-- cheap reads. Returns whichever nearby point matched first, same
+-- (name, stage) shape as getFoliageNameAt.
+function ImmersiveWeathering:getFoliageNameNearby(x, z)
+    for _, offset in ipairs(FOLIAGE_DETECT_OFFSETS) do
+        local name, value = self:getFoliageNameAt(x + offset[1] * FOLIAGE_DETECT_RADIUS, z + offset[2] * FOLIAGE_DETECT_RADIUS)
+
+        if name ~= nil then
+            return name, value
+        end
+    end
+
+    return nil
+end
+
+-- Shared by every call site that might be creating or discovering a
+-- trackPatch=true instance (entry-resolution discovery, fresh
+-- placement, cluster spread - see applyFoliageTransitions) - one place
+-- owning "should this coordinate be tracked" instead of three copies of
+-- the same entry.trackPatch/nil-guard/height-lookup logic.
+-- registerIfNeeded's own dedupe means this is safe to call every time
+-- the sweep touches a trackPatch entry, not just the first time.
+function ImmersiveWeathering:registerTrackedPatchIfNeeded(entry, x, z)
+    if entry == nil or not entry.trackPatch or self.trackedPatches == nil then
+        return
+    end
+
+    local y = getTerrainHeightAtWorldPos(g_terrainNode, x, 0, z)
+    self.trackedPatches:registerIfNeeded(entry.name, x, y, z)
+end
+
 function ImmersiveWeathering:getSeedbedGroundTypeValue()
     if self.seedbedGroundTypeValue == nil then
         self.seedbedGroundTypeValue = FieldGroundType.getValueByType(FieldGroundType.SEEDBED)
@@ -1414,7 +1503,7 @@ end
 -- genuinely rare - only the deliberate single-point tool is deterministic.
 -- Palette-driven replacement for the old hardcoded FOLIAGE_STATE_OPTIONS/
 -- FOLIAGE_SPREAD_RULES tables - see IWFoliagePalette.lua and the map's own
--- iw.xml (or the built-in single-grassShort default on a map with none).
+-- iw-map.xml (or the built-in single-grassShort default on a map with none).
 -- Two rates the palette design itself doesn't cover are still module
 -- constants here rather than new config surface invented unprompted -
 -- flagged for retuning if the new balance doesn't feel right:
@@ -1446,7 +1535,33 @@ local FOLIAGE_SPREAD_CHANCE = 0.10
 
 function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force, allowFreshPlacement)
     local name, stage = self:getFoliageNameAt(x, z)
+
+    -- Direct exact-point read missed - before treating this as genuinely
+    -- empty ground, check a small ring around it (see
+    -- getFoliageNameNearby's own comment for why the exact point alone
+    -- isn't trustworthy against a small existing stamp). Growth/mutation/
+    -- spread below still write to the ORIGINAL x,z either way, not the
+    -- nearby point that matched - re-stamping at the sweep's own sample
+    -- point, which also helps thicken/fill the gaps in the existing
+    -- patch's footprint over repeated sweeps.
+    if name == nil then
+        name, stage = self:getFoliageNameNearby(x, z)
+
+        if name ~= nil then
+            stats.foundNearby = (stats.foundNearby or 0) + 1
+        end
+    end
+
     local entry = self.foliagePalette:findEntry(name, stage)
+
+    -- Discovery: whenever the sweep recognizes an EXISTING trackPatch
+    -- instance, make sure it's registered - covers both "IW placed this
+    -- itself a while ago and is only now re-sampling it" and "this was
+    -- always here, map-author-placed content IW never planted" (the
+    -- actual motivating case - see IWFoliagePalette's trackPatch field
+    -- comment). registerIfNeeded's own dedupe makes this a cheap no-op
+    -- once something's already tracked.
+    self:registerTrackedPatchIfNeeded(entry, x, z)
 
     if entry == nil then
         -- Nothing here the palette recognizes - either truly empty, or
@@ -1469,6 +1584,7 @@ function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force, allowFr
             then
                 stats.seeded = (stats.seeded or 0) + 1
                 debugPrintf("[Palette] seeded %s at (%.2f %.2f)", writeName, x, z)
+                self:registerTrackedPatchIfNeeded(freshEntry, x, z)
             end
         end
 
@@ -1551,9 +1667,112 @@ function ImmersiveWeathering:applyFoliageTransitions(x, z, stats, force, allowFr
                 if self:placeFoliage(nx, nz, spreadWriteName) then
                     stats.spread = (stats.spread or 0) + 1
                     debugPrintf("[Cluster] spread %s -> (%.2f %.2f) succeeded", spreadWriteName, nx, nz)
+                    self:registerTrackedPatchIfNeeded(entry, nx, nz)
                 end
             end
         end
+    end
+end
+
+-- Deterministic pass over every tracked patch (see IWTrackedPatches and
+-- IWFoliagePalette's trackPatch/trackedSpreadChance/
+-- trackedRejuvenateChance fields) - called once per sweep, NOT sampled,
+-- so a tracked patch gets checked every single sweep instead of relying
+-- on the random sampler ever landing near it again.
+--
+-- "Past stageMax" is the trigger, not "at stageMax": for a
+-- sequential=false entry (e.g. decoFoliage, a pool of unrelated
+-- species/variants with no real progression) states within
+-- stageMin..stageMax are all equally normal variety, never a "fully
+-- grown" signal - only a raw value beyond what iw-map.xml actually
+-- curates means "landed in genuinely undefined/degenerate territory"
+-- (the exact same failure mode decoBush's own states 13-15 comment
+-- describes - a real, previously-observed bug class, not a hypothetical
+-- one). For a sequential entry, growStage already clamps at stageMax on
+-- IW's own growth, so "past max" there specifically means something
+-- OTHER than IW's own growth pushed it there (an external/map-author
+-- placement, or base-game growth outside IW's control) - "rotten and
+-- stuck" either way.
+function ImmersiveWeathering:processTrackedPatches(stats)
+    if self.trackedPatches == nil then
+        return
+    end
+
+    local patches = self.trackedPatches:getAll()
+    local toRemove = {}
+
+    for index, patch in ipairs(patches) do
+        local entry = self.foliagePalette:findEntry(patch.name)
+
+        if entry == nil or not entry.trackPatch then
+            -- Config changed out from under a saved entry (map author
+            -- removed/retagged it) - nothing sensible left to do with
+            -- this coordinate.
+            table.insert(toRemove, index)
+        else
+            local name, stage = self:getFoliageNameAt(patch.x, patch.z)
+
+            if name == nil then
+                name, stage = self:getFoliageNameNearby(patch.x, patch.z)
+            end
+
+            if name ~= entry.name then
+                -- Gone (player mowed/plowed/built over it) or mutated
+                -- into something else entirely - nothing left here for
+                -- this entry to manage, stop tracking it. Matches the
+                -- original ask exactly: "if flower is still there...
+                -- if not, delete entry."
+                table.insert(toRemove, index)
+                debugPrintf("[Tracked] %s at (%.2f %.2f) no longer found - untracked", patch.name, patch.x, patch.z)
+            elseif stage ~= nil and stage > entry.stageMax then
+                stats.trackedRotten = (stats.trackedRotten or 0) + 1
+
+                -- Spread first, using the SOURCE's still-rotten stage
+                -- (pickSpreadStage clones the source's current species
+                -- for non-sequential entries, same as normal cluster
+                -- spread) - separate, low-by-default chance so a
+                -- guaranteed-every-sweep check doesn't mean guaranteed
+                -- map takeover.
+                if math.random() * 100 <= entry.trackedSpreadChance then
+                    local offset = NEIGHBOR_OFFSETS[math.random(#NEIGHBOR_OFFSETS)]
+                    local nx = patch.x + offset[1] * NEIGHBOR_STEP
+                    local nz = patch.z + offset[2] * NEIGHBOR_STEP
+                    local neighborName = self:getFoliageNameAt(nx, nz)
+
+                    if neighborName == nil
+                        and self:fieldIsMaterial(nx, nz, WEATHERABLE_MATERIALS)
+                        and self:isSpotClearForFoliage(nx, nz)
+                    then
+                        local spreadStage = self.foliagePalette:pickSpreadStage(entry, stage)
+                        local spreadWriteName = self.foliagePalette:getWriteName(entry, spreadStage)
+
+                        if self:placeFoliage(nx, nz, spreadWriteName) then
+                            stats.trackedSpread = (stats.trackedSpread or 0) + 1
+                            debugPrintf("[Tracked] %s spread (%.2f %.2f) -> (%.2f %.2f)", patch.name, patch.x, patch.z, nx, nz)
+                            self:registerTrackedPatchIfNeeded(entry, nx, nz)
+                        end
+                    end
+                end
+
+                -- Rejuvenate the source back to a fresh young instance -
+                -- high-by-default chance (the actual bug being fixed:
+                -- "even the 10k sweep has a low chance to fix a rotten
+                -- sunflower we placed"). Stays tracked either way, so it
+                -- cycles through this same life stage again later.
+                if math.random() * 100 <= entry.trackedRejuvenateChance then
+                    local rejuvenateWriteName = self.foliagePalette:getWriteName(entry, entry.stageMin)
+
+                    if self:placeFoliage(patch.x, patch.z, rejuvenateWriteName) then
+                        stats.trackedRejuvenated = (stats.trackedRejuvenated or 0) + 1
+                        debugPrintf("[Tracked] %s at (%.2f %.2f) rejuvenated -> %s", patch.name, patch.x, patch.z, rejuvenateWriteName)
+                    end
+                end
+            end
+        end
+    end
+
+    if #toRemove > 0 then
+        self.trackedPatches:removeByIndices(toRemove)
     end
 end
 
@@ -1607,10 +1826,15 @@ function ImmersiveWeathering:runWeatheringSweep()
         self:applyTerrainRegrowth(x, z, stats)
     end
 
+    -- Deterministic, not sampled - processes every tracked patch exactly
+    -- once per sweep regardless of sampleCount, see
+    -- processTrackedPatches's own comment for why.
+    self:processTrackedPatches(stats)
+
     local elapsedMs = (getTimeSec() - startTime) * 1000
 
     debugPrintf(
-            "Immersive Weathering (FS25): FINISHED %d samples, seeded=%d spread=%d (candidates=%d) grown=%d mutated=%d regrown=%d, %.3f ms",
+            "Immersive Weathering (FS25): FINISHED %d samples, seeded=%d spread=%d (candidates=%d) grown=%d mutated=%d regrown=%d foundNearby=%d trackedRotten=%d trackedSpread=%d trackedRejuvenated=%d, %.3f ms",
             sampleCount,
             stats.seeded or 0,
             stats.spread or 0,
@@ -1618,6 +1842,10 @@ function ImmersiveWeathering:runWeatheringSweep()
             stats.grown or 0,
             stats.mutated or 0,
             stats.regrown or 0,
+            stats.foundNearby or 0,
+            stats.trackedRotten or 0,
+            stats.trackedSpread or 0,
+            stats.trackedRejuvenated or 0,
             elapsedMs
         )
     debugPrint("----------------------------------------------------------------------")
@@ -2086,12 +2314,12 @@ end
 
 -- Public: the set of real fruit type indices a sowing machine must have
 -- loaded to count as "sowing grass" here at all - a map author's own
--- <seederFruitTypes> list in iw.xml if declared, or the hardcoded
+-- <seederFruitTypes> list in iw-map.xml if declared, or the hardcoded
 -- MEADOW/GRASS default otherwise (today's behavior, confirmed real via
 -- Roller.lua's own grassFruitTypes = {FruitType.GRASS, FruitType.MEADOW},
 -- the same two fruit types the base game itself treats as "grass" for
 -- its own roller mechanic - unchanged for every map that doesn't declare
--- its own list, so this can never silently break an existing iw.xml).
+-- its own list, so this can never silently break an existing iw-map.xml).
 -- Resolved and cached once, not per-call - fruit type registration
 -- doesn't change mid-session. An unresolvable declared name is logged
 -- and skipped, not a hard error - one typo shouldn't take the whole list
@@ -2109,7 +2337,7 @@ function ImmersiveWeathering:getAllowedSeederFruitTypeIndices()
         if fruitTypeDesc ~= nil then
             indices[fruitTypeDesc.index] = true
         else
-            debugPrintf("[Seeder] iw.xml declared unknown fruit type '%s' - ignored", name)
+            debugPrintf("[Seeder] iw-map.xml declared unknown fruit type '%s' - ignored", name)
         end
     end
 
@@ -2159,7 +2387,7 @@ function ImmersiveWeathering:paintTerrainAtLayer(x, z, layerId)
     paint:apply(false, "onPaintApplied", callbackTarget)
 end
 
--- iw.xml <groundMapping> drives this when present (real texture layer
+-- iw-map.xml <groundMapping> drives this when present (real texture layer
 -- weights + optional "also plant this foliage" chance), falling back to
 -- the hardcoded TYRE_PAINT_PALETTES 90/10 split with no foliage chance
 -- when absent - same backward-compat shape the foliage palette already
@@ -2254,7 +2482,7 @@ end
 -- (a bush, existing deco, ...), matching "just want to replace dirt with
 -- grass" from earlier, extended to "and grass where there's nothing yet".
 -- Palette-driven: places whatever entry is flagged seeder="true" in the
--- current map's iw.xml (or the built-in grassShort default), at its
+-- current map's iw-map.xml (or the built-in grassShort default), at its
 -- configured seederLevel, instead of hardcoding grassShort.
 function ImmersiveWeathering:sowGrassFoliageIfEmpty(x, z)
     if self:getFoliageNameAt(x, z) == nil then
@@ -2717,7 +2945,12 @@ function ImmersiveWeathering:onWheelDestructionUpdate(
     if isGrounded ~= wheelDestruction.immersiveWeatheringWasGrounded then
         wheelDestruction.immersiveWeatheringWasGrounded = isGrounded
         local x, _, z = getWorldTranslation(wheel.repr)
-        debugPrintf("[TyreDebug] wheel contact -> %s at (%.2f %.2f)", tostring(isGrounded), x, z)
+        -- chatty (a line per wheel contact flip): only while WAILA's shared
+        -- debug-log switch is on (WAILA hub, General tab). Without WAILA, silent.
+        local waila = g_currentMission ~= nil and g_currentMission.waila or nil
+        if waila ~= nil and waila.isDebugLogEnabled ~= nil and waila.isDebugLogEnabled() then
+            debugPrintf("[TyreDebug] wheel contact -> %s at (%.2f %.2f)", tostring(isGrounded), x, z)
+        end
     end
 
     if vehicle.lastSpeedReal <= 0.0002 then
