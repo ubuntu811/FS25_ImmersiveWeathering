@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="93">
+    <author>ubuntu811</author>
+    <version>1.9.0.0</version>
+    <title>
+        <en>Immersive Weathering</en>
+    </title>
+    <description>
+        <en>Adds realistic weed growth to gravel plots overnight.</en>
+    </description>
+    <iconFilename>icon_immersive_weathering.dds</iconFilename>
+    <multiplayer supported="true"/>
+
+    <!-- No hard dependency - IW works completely standalone now. WAILA is
+         still a nice-to-have (its HUD gives IW's own panels a left-edge
+         anchor point, and its debug tools are handy for inspecting the
+         ground IW is painting), but nothing here requires it to be
+         installed - every WAILA read is nil-guarded with its own
+         fallback. -->
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/UIHelper.lua" />
+        <sourceFile filename="scripts/IWSweep.lua" />
+        <sourceFile filename="scripts/IWClass.lua" />
+        <sourceFile filename="scripts/IWWearSpots.lua" />
+        <sourceFile filename="scripts/IWLevels.lua" />
+        <sourceFile filename="scripts/IWConfig.lua" />
+        <sourceFile filename="scripts/IWSettingsUI.lua" />
+        <sourceFile filename="scripts/IWWailaTab.lua" />
+        <sourceFile filename="scripts/IWPatterns.lua" />
+        <sourceFile filename="scripts/IWTextureSets.lua" />
+        <sourceFile filename="scripts/IWPaintCells.lua" />
+        <sourceFile filename="scripts/IWTextureStore.lua" />
+        <sourceFile filename="scripts/IWTexturesTab.lua" />
+        <sourceFile filename="scripts/IWFoliageSets.lua" />
+        <sourceFile filename="scripts/IWFoliageStore.lua" />
+        <sourceFile filename="scripts/IWFoliageTab.lua" />
+        <sourceFile filename="scripts/IWFoliagePreview.lua" />
+        <sourceFile filename="scripts/IWFoliageNames.lua" />
+        <sourceFile filename="scripts/IWFoliagePalette.lua" />
+        <sourceFile filename="scripts/IWTrackedPatches.lua" />
+        <sourceFile filename="scripts/ImmersiveWeathering.lua" />
+        <sourceFile filename="scripts/IWPaintMenu.lua" />
+        <sourceFile filename="scripts/IWFoliageMenu.lua" />
+        <sourceFile filename="scripts/IWClassOverlay.lua" />
+    </extraSourceFiles>
+
+    <actions>
+        <action name="IW_WEATHER_CROSSHAIR" axisType="HALF"/>
+        <action name="IW_RUN_SWEEP" axisType="HALF"/>
+        <!-- Every previously-separate debug/test keybind (place test rig,
+             fill area, dump terrain layers, paint layer test row, density
+             probe) is consolidated into one OptionDialog-based menu now -
+             see ImmersiveWeathering:showDebugMenu. Their underlying
+             functions are unchanged, only the direct keybinds are gone -
+             the keybind list was growing one throwaway investigation tool
+             at a time and had become unmanageable. Weather crosshair/run
+             sweep/toggle tyre effects stay on direct keys - those are core
+             gameplay actions used constantly during testing, not one-off
+             debug tools, so a menu round-trip would be the wrong tradeoff
+             for them specifically. -->
+        <action name="IW_DEBUG_MENU" axisType="HALF"/>
+        <!-- IW_TOGGLE_SAMPLE_COUNT, IW_CYCLE_WITHER_CHANCE,
+             IW_TOGGLE_PAINT_BIAS, IW_SWAP_DIRT_GRAVEL and IW_SOW_GRASS
+             retired the same way - sample count/wither chance/paint bias
+             now live on the Settings page instead of a cycle key;
+             swap/sow are superseded by automatic mechanics (material
+             drift, the seeder feature) that do the same job without a
+             manual key.
+             No category attribute: engine's own ONFOOT/VEHICLE context
+             switch can't silently deactivate these out from under us -
+             see the earlier note in the Lua about the flaky per-vehicle
+             registration attempt that was fully reverted. No AI-exclude
+             toggle - AI-driven vehicles are unconditionally excluded from
+             tyre effects in the Lua, player-only by design, not an
+             option. -->
+        <action name="IW_TOGGLE_TYRE_EFFECTS" axisType="HALF"/>
+    </actions>
+
+    <inputBinding>
+        <actionBinding action="IW_WEATHER_CROSSHAIR">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_h" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_RUN_SWEEP">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_n" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_DEBUG_MENU">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_lctrl KEY_m" index="1" />
+        </actionBinding>
+        <actionBinding action="IW_TOGGLE_TYRE_EFFECTS">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_t" index="1" />
+        </actionBinding>
+    </inputBinding>
+
+    <!-- the construction screen's tab for the texture sets: declared the official way (read by the game's mod loader, added by StoreManager:loadMapData); no iconFilename: the store manager resolves it
+         without the mod folder -->
+    <constructionCategories>
+        <tab categoryName="landscaping" name="iwTextures" title="$l10n_iw_constructionTab_textures"/>
+        <tab categoryName="landscaping" name="iwFoliage" title="$l10n_iw_constructionTab_foliage"/>
+    </constructionCategories>
+
+    <l10n>
+         <text name="iw_constructionTab_textures">
+            <en>IW Textures</en>
+         </text>
+         <text name="iw_constructionTab_foliage">
+            <en>IW Foliage</en>
+         </text>
+         <text name="input_IW_WEATHER_CROSSHAIR">
+            <en>Weather Target</en>
+        </text>
+         <text name="input_IW_RUN_SWEEP">
+            <en>Weathering Sweep</en>
+        </text>
+         <text name="input_IW_DEBUG_MENU">
+            <en>Debug tools menu</en>
+        </text>
+         <text name="input_IW_TOGGLE_TYRE_EFFECTS">
+            <en>Tyre withering</en>
+        </text>
+
+        <!-- UIHelper.createControlsDynamically requires a _title/_info
+             pair per control (id = prefix .. name), plus one _title for
+             the section header itself. -->
+        <text name="iw_setting_title">
+            <en>Immersive Weathering</en>
+        </text>
+        <text name="iw_tyreWitherLevelIndex_title">
+            <en>Tyre withering chance</en>
+        </text>
+        <text name="iw_tyreWitherLevelIndex_info">
+            <en>How often grass converts to dirt/gravel under tyre contact.</en>
+        </text>
+        <text name="iw_tyrePaintPaletteIndex_title">
+            <en>Tyre withering material bias</en>
+        </text>
+        <text name="iw_tyrePaintPaletteIndex_info">
+            <en>Which material fresh conversions lean toward.</en>
+        </text>
+        <text name="iw_sweepSampleCountIndex_title">
+            <en>Nightly sweep sample count</en>
+        </text>
+        <text name="iw_sweepSampleCountIndex_info">
+            <en>How many points the nightly weathering sweep samples. Higher covers more ground per sweep but costs more per run.</en>
+        </text>
+        <text name="iw_wheelSensitivityIndex_title">
+            <en>Wheel count sensitivity</en>
+        </text>
+        <text name="iw_wheelSensitivityIndex_info">
+            <en>How much extra wheels discount chance per wheel. 0% = every wheel rolls independently (more wheels = more effect overall); 100% = a many-wheeled vehicle wears ground the same overall rate as a 2-wheeled one.</en>
+        </text>
+        <text name="iw_sweepIntervalIndex_title">
+            <en>Weathering pace</en>
+        </text>
+        <text name="iw_sweepIntervalIndex_info">
+            <en>How often a weathering pass runs. Once per game day is the old way and almost never happens when a game day lasts a month or runs at half speed. The others run in real time, spread over many frames, and mostly near you.</en>
+        </text>
+        <text name="iw_verboseLoggingIndex_title">
+            <en>Verbose debug logging</en>
+        </text>
+        <text name="iw_verboseLoggingIndex_info">
+            <en>Log every tyre material drift/wither/clear event. Off by default - many-wheeled vehicles can fire dozens of these per tick, which costs performance.</en>
+        </text>
+
+        <!-- Choice-control value labels - one per entry in
+             TYRE_WITHER_LEVEL_LABELS/TYRE_PAINT_PALETTE_LABELS/
+             SWEEP_SAMPLE_COUNT_LABELS, same order. iw_wither_pct_* is also
+             reused directly for wheelSensitivityIndex - identical 0/20/
+             40/60/80/100% meaning, no reason for duplicate labels. -->
+        <text name="iw_wither_pct_0"><en>0%</en></text>
+        <text name="iw_wither_pct_1"><en>1%</en></text>
+        <text name="iw_wither_pct_2"><en>2%</en></text>
+        <text name="iw_wither_pct_5"><en>5%</en></text>
+        <text name="iw_wither_pct_10"><en>10%</en></text>
+        <text name="iw_wither_pct_20"><en>20%</en></text>
+        <text name="iw_wither_pct_30"><en>30%</en></text>
+        <text name="iw_wither_pct_40"><en>40%</en></text>
+        <text name="iw_wither_pct_50"><en>50%</en></text>
+        <text name="iw_wither_pct_60"><en>60%</en></text>
+        <text name="iw_wither_pct_70"><en>70%</en></text>
+        <text name="iw_wither_pct_75"><en>75%</en></text>
+        <text name="iw_wither_pct_80"><en>80%</en></text>
+        <text name="iw_wither_pct_90"><en>90%</en></text>
+        <text name="iw_wither_pct_100"><en>100%</en></text>
+        <text name="iw_material_dirt"><en>Dirt-leaning</en></text>
+        <text name="iw_material_gravel"><en>Gravel-leaning</en></text>
+        <text name="iw_samples_1000"><en>1000</en></text>
+        <text name="iw_samples_2000"><en>2000</en></text>
+        <text name="iw_samples_4000"><en>4000</en></text>
+        <text name="iw_samples_6000"><en>6000</en></text>
+        <text name="iw_samples_8000"><en>8000</en></text>
+        <text name="iw_samples_10000"><en>10000</en></text>
+        <text name="iw_sweep_calendar"><en>Once per game day</en></text>
+        <text name="iw_sweep_10min"><en>Every 10 minutes</en></text>
+        <text name="iw_sweep_5min"><en>Every 5 minutes</en></text>
+        <text name="iw_sweep_2min"><en>Every 2 minutes</en></text>
+        <text name="iw_off"><en>Off</en></text>
+        <text name="iw_on"><en>On</en></text>
+     </l10n>
+</modDesc>
